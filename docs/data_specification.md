@@ -1125,9 +1125,236 @@ JSONL row shape (Section 3 of the system code):
 `meta.preserve_spans` is reserved for synthetic records (negation-cue
 ranges) and is not used in dev/test.
 
+For production-scale gold storage (annotator tracking, version locking,
+cross-split leak detection, queryable coverage views) records also live in
+Postgres — see Section 20.
+
 ---
 
-## 20. Open questions to resolve before first labeling pass
+## 20. Database storage (Postgres)
+
+Production data lives in a Postgres database. The synthetic training set
+stays as JSONL on disk (regenerable from pools — no DB storage warranted),
+but every long-lived asset — pool data, gold records, annotations,
+adjudications, dataset versions — is in Postgres.
+
+### 20.1 Local development setup
+
+Postgres runs in a Docker container declared in `docker-compose.yml`:
+
+| Setting | Value |
+|---|---|
+| Host port | `6655` (mapped to container `5432`) |
+| Database name | `multi_entity_ner` |
+| User / password | `ner` / `ner` |
+| Default DSN | `postgresql://ner:ner@localhost:6655/multi_entity_ner` |
+| Image | `postgres:16-alpine` |
+| Persistent volume | `ner_pg_data` (survives container restarts) |
+
+```bash
+docker compose up -d                                    # start Postgres
+python -m scripts.init_postgres                         # apply schema + load example seed
+python -m scripts.init_postgres --no-seed               # schema only
+python -m scripts.init_postgres --verify                # print row counts + coverage view
+python -m scripts.init_postgres --dsn $DATABASE_URL     # override DSN (or env DATABASE_URL)
+```
+
+The init script is **idempotent**: schema uses `CREATE ... IF NOT EXISTS`,
+seed inserts use `ON CONFLICT ... DO NOTHING`, triggers are `CREATE OR
+REPLACE`. Safe to re-run against a partially-populated DB.
+
+### 20.2 Schema layout
+
+The schema is in `sql/postgres/schema.sql` and has three zones.
+
+**Zone A — Synthetic pools** (drop-in equivalent of the SQLite contract,
+so `ner.data.pools.load_from_postgres` can replace `load_from_sqlite`
+once production pools are loaded):
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `entity_pools` | `id, entity_type, value, weight` | Real entity surface forms by type |
+| `decoy_pools` | `id, slot_name, value, weight` | Non-entity fillers (qty / unit / cue / frozen_compound) |
+| `templates` | `id, template, weight` | Slot-fill templates |
+
+Constraints: `entity_type ∈ {PERSON, ORG, ADDRESS, COMMODITY}`,
+`UNIQUE (entity_type, value)`, `UNIQUE (slot_name, value)`,
+`UNIQUE (template)`.
+
+**Zone B — Gold store** (real, hand-labeled records and their entities):
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `gold_records` | `id, text, source, split, version_id, content_hash, locked_at, created_at` | One row per labeled record |
+| `gold_entities` | `id, record_id, type, surface, start_offset, end_offset, polarity` | One row per labeled entity span |
+
+Constraints:
+
+- `split ∈ {dev, test, edge_case}`.
+- `source ∈ {invoice, manifest, email, webhook, ocr, other}`.
+- `polarity ∈ {POS, NEG}`; `polarity = NEG ⇒ type = COMMODITY`.
+- `start_offset ≥ 0`, `end_offset > start_offset` (half-open invariant).
+- `UNIQUE (content_hash)` is **global** — no record can appear in both
+  dev and test under any normalization the labeler chose.
+- `locked_at IS NOT NULL` ⇒ row is sealed; triggers below reject any
+  UPDATE / DELETE on locked rows.
+
+**Zone C — Annotation trail** (audit log for IAA + adjudication + version
+locking):
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `annotators` | `id, code, name, role, created_at` | One row per labeler; `role ∈ {annotator, adjudicator, admin}` |
+| `annotations` | `id, record_id, annotator_id, payload, created_at` | Raw per-annotator labels before adjudication; `payload` is `JSONB` |
+| `adjudications` | `id, record_id, adjudicator_id, decided_at, notes` | Final-decision audit trail; one per record |
+| `dataset_versions` | `id, tag, scope, manifest_sha, notes, created_at, locked_at` | Versioned releases; semver tag + content-hash manifest |
+
+The `payload` column on `annotations` is the per-annotator label list
+before adjudication, used to compute Cohen's κ and per-record disagreement.
+Payload shape:
+
+```json
+[
+  {"type": "PERSON", "start": 0, "end": 14, "polarity": "POS"},
+  {"type": "COMMODITY", "start": 21, "end": 43, "polarity": "POS"}
+]
+```
+
+The adjudicated labels — i.e., the gold — live in `gold_entities`. The
+`annotations` rows are kept forever for IAA dashboards but never used as
+training or eval input.
+
+### 20.3 Coverage view
+
+`v_split_coverage` is a SELECT-only view that emits the per-split bucket
+counts the Section 15 acceptance gates need:
+
+```sql
+SELECT * FROM v_split_coverage;
+-- columns: split, record_count, person_spans, org_spans, address_spans,
+--          commodity_pos_spans, commodity_neg_spans, zero_entity_records
+```
+
+CI can query this view directly to fail a release when bucket minimums
+aren't met.
+
+### 20.4 Immutability triggers
+
+Two `BEFORE UPDATE` and `BEFORE DELETE` triggers on `gold_records` reject
+any change to a row whose `locked_at` is non-null:
+
+```
+RAISE EXCEPTION 'gold_records.id=% is locked at % - update forbidden'
+```
+
+This enforces the "test is a vault" rule from Section 1 at the database
+level. Operationally this means:
+
+- A row is **locked** by setting `locked_at = NOW()` (admin-only operation).
+- Once locked, mutation requires a DB superuser (or temporarily disabling
+  the trigger via a documented break-glass runbook).
+- The same trigger guards the test set from accidental migration drift.
+
+### 20.5 Split-handling contract
+
+| Where data lives | Storage | Mutable? | Notes |
+|---|---|---|---|
+| **Synthetic train** | `data/train.jsonl` + `preprocess.json` | Regenerated on demand | Not in Postgres — regeneration from pools is the source of truth |
+| **Pools (entity / decoy / templates)** | Postgres tables (Zone A) | Append-only in practice; admin-managed | Loaded via `scripts.init_postgres`; updates trigger a train.jsonl rebuild |
+| **Dev gold** | `gold_records.split = 'dev'` | Mutable; admin-tracked changes | Updates touch the version tag in `dataset_versions` |
+| **Test gold** | `gold_records.split = 'test'`, `locked_at IS NOT NULL` | **Immutable** by trigger | Sealed at release prep time; opened once per release candidate |
+| **Edge-case smoke** | `gold_records.split = 'edge_case'` AND in-repo `edge_cases.jsonl` | Append-only | Lives in both DB (for queryability) and git (for code review) |
+
+Leak prevention is multi-layered:
+
+1. **DB constraint**: `UNIQUE (content_hash)` on `gold_records` is global,
+   so the same normalized text cannot appear in two splits.
+2. **Pre-insert app check**: ingestion CLI hashes `text` after passing it
+   through `ner.preprocess.Preprocessor.clean`, ensuring normalized
+   equivalence (NBSP → space, etc.) is caught.
+3. **Nightly job**: token-Jaccard pairwise check across splits; any
+   pair ≥ 0.9 flags a human review item.
+
+### 20.6 Versioning and lineage
+
+Every dev/test release gets a `dataset_versions` row:
+
+```sql
+INSERT INTO dataset_versions (tag, scope, manifest_sha, notes)
+VALUES ('dev-v2.3.0', 'dev', 'sha256:abcd…', 'Q4 2024 + 80 negation additions');
+
+UPDATE gold_records SET version_id = (SELECT id FROM dataset_versions
+                                       WHERE tag = 'dev-v2.3.0')
+WHERE split = 'dev' AND version_id IS NULL;
+```
+
+Locking a release:
+
+```sql
+UPDATE dataset_versions SET locked_at = NOW() WHERE tag = 'dev-v2.3.0';
+UPDATE gold_records     SET locked_at = NOW()
+WHERE version_id = (SELECT id FROM dataset_versions WHERE tag = 'dev-v2.3.0')
+  AND split = 'test';
+```
+
+The `manifest_sha` is the SHA-256 of the canonical (sorted by `id`,
+JSON-serialized) record set at lock time; any drift detectable by
+re-hashing.
+
+### 20.7 Migrations
+
+Schema evolution uses `sql/postgres/migrations/NNNN_description.sql`
+files applied in order. Conventions:
+
+- Every migration is **idempotent** (`IF NOT EXISTS` / `IF EXISTS`).
+- Every migration ends with a `INSERT INTO schema_migrations (version,
+  applied_at)` row (table added by the first migration).
+- No migration mutates `gold_records` rows whose `locked_at IS NOT NULL`;
+  if structurally necessary, the migration first records a snapshot to
+  an archive table.
+- Migrations run via `python -m scripts.init_postgres --migrate-only`
+  (planned; out of scope for v1 init).
+
+### 20.8 Backups and DR
+
+- Local dev: the Docker volume `ner_pg_data` persists across container
+  restarts; `docker compose down` does NOT delete data.
+- Staging / prod: managed Postgres (RDS / Cloud SQL / equivalent) with
+  daily point-in-time recovery snapshots, 30-day retention minimum.
+- Pre-release: a `pg_dump` of the dev + test splits is archived to
+  object storage tagged with the dataset version.
+
+### 20.9 Connection conventions
+
+- **Default DSN**: `postgresql://ner:ner@localhost:6655/multi_entity_ner`
+  for local; production reads `DATABASE_URL` from the environment.
+- **Python**: `ner.data.pools.load_from_postgres(dsn=None)` — `None`
+  falls back to `DEFAULT_POSTGRES_DSN` then `DATABASE_URL`.
+- **psycopg3** is the canonical driver, declared in
+  `pyproject.toml` under the `[data]` extra. Install via
+  `pip install -e .[data]`.
+
+### 20.10 File layout for the Postgres assets
+
+```
+docker-compose.yml                    # Postgres in Docker on :6655
+sql/postgres/
+  schema.sql                          # idempotent CREATEs for all tables + triggers + view
+  example_seed.sql                    # ON-CONFLICT-DO-NOTHING seed (mirrors sql/example_seed.sql)
+  migrations/                         # NNNN_*.sql migration files (planned)
+scripts/
+  init_postgres.py                    # apply schema + load seed + verify
+```
+
+The SQLite path (`sql/schema.sql`, `sql/example_seed.sql`,
+`data/pools.sqlite`) stays available for offline / test use — the
+existing test suite and `scripts.generate_data --init-db` keep working
+unchanged. Production switches to Postgres without removing the SQLite
+fallback.
+
+---
+
+## 21. Open questions to resolve before first labeling pass
 
 These are deliberately left ambiguous in the spec because they're product
 calls, not technical ones. Lock answers in `docs/labeling_rubric.md`

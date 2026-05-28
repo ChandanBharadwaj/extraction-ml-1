@@ -29,6 +29,19 @@ pytest tests/test_bio.py -v           # one file
 pytest -k threshold                   # by name substring
 ```
 
+Production data warehouse (Postgres in Docker on `:6655`):
+
+```bash
+docker compose up -d                          # start the DB (multi_entity_ner @ localhost:6655)
+python -m scripts.init_postgres               # apply schema + load example seed
+python -m scripts.init_postgres --verify      # show row counts + v_split_coverage
+```
+
+The schema (`sql/postgres/schema.sql`) covers synthetic pools, the gold
+store, and the annotation / adjudication / versioning trail. See
+`docs/data_specification.md` §20 for the full contract. The SQLite path
+(`sql/schema.sql`, `data/pools.sqlite`) stays available for offline tests.
+
 Pipeline CLIs (all installed as `python -m scripts.<name>`):
 
 ```bash

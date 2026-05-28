@@ -107,6 +107,43 @@ def build_sqlite_from_sql_files(
     return target
 
 
+DEFAULT_POSTGRES_DSN: str = "postgresql://ner:ner@localhost:6655/multi_entity_ner"
+
+
+def load_from_postgres(dsn: str | None = None) -> Pools:
+    """Load pools from a Postgres DB matching sql/postgres/schema.sql.
+
+    The table names and columns match the SQLite contract, so this is a
+    drop-in alternative for `load_from_sqlite` once the production DB is
+    populated (see scripts.init_postgres).
+
+    psycopg is imported lazily so this module remains importable without
+    the [data] extra.
+    """
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise ImportError(
+            "psycopg is required for load_from_postgres; install with "
+            "`pip install -e .[data]`"
+        ) from exc
+
+    pools = Pools()
+    with psycopg.connect(dsn or DEFAULT_POSTGRES_DSN) as conn, conn.cursor() as cur:
+        cur.execute("SELECT entity_type, value, weight FROM entity_pools")
+        for et, value, weight in cur.fetchall():
+            pools.add_entity(et, value, float(weight))
+
+        cur.execute("SELECT slot_name, value, weight FROM decoy_pools")
+        for slot, value, weight in cur.fetchall():
+            pools.add_decoy(slot, value, float(weight))
+
+        cur.execute("SELECT template, weight FROM templates")
+        for tmpl, weight in cur.fetchall():
+            pools.add_template(tmpl, float(weight))
+    return pools
+
+
 def dump_to_json(pools: Pools, path: str | Path) -> None:
     """Serialize pools to JSON for debugging."""
     obj = {

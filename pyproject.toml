@@ -26,6 +26,7 @@ train = [
 ]
 data = [
     "anthropic>=0.40",
+    "psycopg[binary]>=3.1",
 ]
 dev = [
     "pytest>=8.0",
