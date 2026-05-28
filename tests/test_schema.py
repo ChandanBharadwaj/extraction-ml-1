@@ -36,3 +36,42 @@ def test_record_round_trip_dict():
     rec2.validate()
     assert rec2.text == rec.text
     assert rec2.entities[0].to_dict() == rec.entities[0].to_dict()
+
+
+def test_polarity_defaults_to_pos():
+    e = Entity("COMMODITY", "wood", 0, 4)
+    assert e.polarity == "POS"
+
+
+def test_polarity_neg_allowed_on_commodity():
+    e = Entity("COMMODITY", "wood", 0, 4, polarity="NEG")
+    assert e.polarity == "NEG"
+
+
+def test_polarity_neg_rejected_on_non_commodity():
+    for et in ("PERSON", "ORG", "ADDRESS"):
+        with pytest.raises(SpanError):
+            Entity(et, "x", 0, 1, polarity="NEG")
+
+
+def test_unknown_polarity_rejected():
+    with pytest.raises(SpanError):
+        Entity("COMMODITY", "x", 0, 1, polarity="MAYBE")
+
+
+def test_legacy_json_without_polarity_round_trips_as_pos():
+    rec = Record.from_dict({
+        "text": "wood",
+        "entities": [{"type": "COMMODITY", "text": "wood", "start": 0, "end": 4}],
+    })
+    rec.validate()
+    assert rec.entities[0].polarity == "POS"
+    # Writing back includes polarity.
+    assert rec.entities[0].to_dict()["polarity"] == "POS"
+
+
+def test_neg_entity_round_trips_through_dict():
+    e = Entity("COMMODITY", "wood", 0, 4, polarity="NEG")
+    e2 = Entity(**e.to_dict())
+    assert e2.polarity == "NEG"
+    assert e == e2

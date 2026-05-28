@@ -8,13 +8,21 @@ from __future__ import annotations
 ENTITY_TYPES: tuple[str, ...] = ("PERSON", "ORG", "ADDRESS", "COMMODITY")
 
 # Order matters: index = class id. "O" must be 0.
+# COMMODITY carries a polarity (POS/NEG); only its labels are duplicated for
+# the negation case. Append-only — never reorder existing entries.
 LABEL_LIST: tuple[str, ...] = (
     "O",
     "B-PERSON", "I-PERSON",
     "B-ORG", "I-ORG",
     "B-ADDRESS", "I-ADDRESS",
     "B-COMMODITY", "I-COMMODITY",
+    "B-NEG_COMMODITY", "I-NEG_COMMODITY",
 )
+
+# Types that can be negated. Used by Entity validation; non-COMMODITY entities
+# are always POS by domain convention.
+NEGATABLE_TYPES: frozenset[str] = frozenset({"COMMODITY"})
+POLARITIES: frozenset[str] = frozenset({"POS", "NEG"})
 
 LABEL2ID: dict[str, int] = {label: i for i, label in enumerate(LABEL_LIST)}
 ID2LABEL: dict[int, str] = {i: label for i, label in enumerate(LABEL_LIST)}

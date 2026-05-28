@@ -4,6 +4,13 @@ No PyTorch in the serving layer. Loads the saved fast tokenizer directly via
 `tokenizers.Tokenizer.from_file` (zero HuggingFace runtime dep on transformers)
 when available, or falls back to `transformers.AutoTokenizer` if installed.
 
+Threshold gating:
+    If `<artifact_dir>/thresholds.json` exists (produced by
+    `scripts.tune_threshold`), the runtime loads it at startup and gates each
+    non-O argmax by the per-label confidence floor before BIO decoding.
+    Absent that file, the runtime defaults to plain argmax decoding so
+    nothing is breaking when thresholds haven't been tuned yet.
+
 CPU-tuned threading defaults are set conservatively (intra=2, inter=1) since
 records are short and we generally want batch-parallelism over thread-parallelism
 when scaling to millions of records via multiprocessing.
@@ -17,8 +24,8 @@ from typing import Any
 
 import numpy as np
 
-from ner.bio import bio_ids_to_spans
-from ner.constants import MAX_INPUT_CHARS, MAX_SEQ_LEN
+from ner.bio import apply_threshold_gate, bio_ids_to_spans, softmax
+from ner.constants import MAX_INPUT_CHARS, MAX_SEQ_LEN, NUM_LABELS
 from ner.schema import Entity
 
 
@@ -31,6 +38,7 @@ class NERRuntimeConfig:
     intra_op_threads: int = 2
     inter_op_threads: int = 1
     providers: list[str] = field(default_factory=lambda: ["CPUExecutionProvider"])
+    thresholds_path: str | None = None
 
 
 class NERRuntime:
@@ -42,6 +50,7 @@ class NERRuntime:
         self.config = config
         self._session = self._build_session(ort)
         self._tokenizer = self._load_tokenizer()
+        self.thresholds: np.ndarray | None = self._load_thresholds()
 
     def _build_session(self, ort: Any):
         opts = ort.SessionOptions()
@@ -58,9 +67,17 @@ class NERRuntime:
         if tok_path.exists():
             from tokenizers import Tokenizer
             return Tokenizer.from_file(str(tok_path))
-        # Fallback to transformers if a raw tokenizer.json isn't present.
         from transformers import AutoTokenizer
         return AutoTokenizer.from_pretrained(self.config.tokenizer_dir, use_fast=True)
+
+    def _load_thresholds(self) -> np.ndarray | None:
+        path = self.config.thresholds_path
+        if path is None:
+            return None
+        if not Path(path).exists():
+            return None
+        from ner.eval.threshold_sweep import load_thresholds_json
+        return load_thresholds_json(path)
 
     def _encode(self, text: str) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]]]:
         from tokenizers import Tokenizer
@@ -72,7 +89,6 @@ class NERRuntime:
             offsets = enc.offsets[: self.config.max_seq_len]
             return ids, attn, offsets
 
-        # transformers fallback
         enc = self._tokenizer(
             text,
             return_offsets_mapping=True,
@@ -86,6 +102,19 @@ class NERRuntime:
             [tuple(o) for o in enc["offset_mapping"][0].tolist()],
         )
 
+    def _decode_logits(
+        self,
+        logits: np.ndarray,
+        offsets: list[tuple[int, int]],
+        text: str,
+    ) -> list[Entity]:
+        if self.thresholds is None:
+            pred_ids = np.argmax(logits, axis=-1).tolist()
+        else:
+            probs = softmax(logits.astype(np.float32), axis=-1)
+            pred_ids = apply_threshold_gate(probs, self.thresholds).tolist()
+        return bio_ids_to_spans(pred_ids, offsets, text)
+
     def predict(self, text: str) -> list[Entity]:
         if len(text) > self.config.max_input_chars:
             text = text[: self.config.max_input_chars]
@@ -94,15 +123,9 @@ class NERRuntime:
             ["logits"],
             {"input_ids": input_ids, "attention_mask": attention_mask},
         )[0]
-        pred_ids = np.argmax(logits[0], axis=-1).tolist()
-        return bio_ids_to_spans(pred_ids, offsets, text)
+        return self._decode_logits(logits[0], offsets, text)
 
     def predict_batch(self, texts: list[str]) -> list[list[Entity]]:
-        """Naive batch: pad to max length and run a single session.run call.
-
-        For very large backlogs prefer a multi-process pool; ONNX Runtime
-        already parallelizes within a single inference call.
-        """
         if not texts:
             return []
         truncated = [t[: self.config.max_input_chars] for t in texts]
@@ -121,21 +144,27 @@ class NERRuntime:
             ["logits"],
             {"input_ids": batch_ids, "attention_mask": batch_mask},
         )[0]
-        pred_ids = np.argmax(logits, axis=-1)
         return [
-            bio_ids_to_spans(pred_ids[i].tolist(), all_offsets[i], truncated[i])
+            self._decode_logits(logits[i], all_offsets[i], truncated[i])
             for i in range(len(texts))
         ]
 
 
 def from_artifact_dir(artifact_dir: str | Path) -> NERRuntime:
-    """Convenience loader: expects `model.onnx` and tokenizer files in `artifact_dir`."""
+    """Convenience loader: expects `model.onnx` and tokenizer files in
+    `artifact_dir`. If `thresholds.json` is present in the same directory,
+    it's loaded automatically and applied at decode time."""
     artifact_dir = Path(artifact_dir)
+    thresholds_path: str | None = None
+    candidate = artifact_dir / "thresholds.json"
+    if candidate.exists():
+        thresholds_path = str(candidate)
     return NERRuntime(
         NERRuntimeConfig(
             onnx_path=str(artifact_dir / "model.onnx"),
             tokenizer_dir=str(artifact_dir),
             intra_op_threads=int(os.environ.get("ORT_INTRA_OP", "2")),
             inter_op_threads=int(os.environ.get("ORT_INTER_OP", "1")),
+            thresholds_path=thresholds_path,
         )
     )

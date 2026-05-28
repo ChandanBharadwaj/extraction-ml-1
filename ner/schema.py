@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ner.constants import ENTITY_TYPES
+from ner.constants import ENTITY_TYPES, NEGATABLE_TYPES, POLARITIES
 
 
 class SpanError(ValueError):
@@ -22,12 +22,20 @@ class Entity:
     text: str
     start: int  # inclusive
     end: int    # exclusive (half-open)
+    polarity: str = "POS"  # POS / NEG; NEG is only valid for NEGATABLE_TYPES
 
     def __post_init__(self) -> None:
         if self.type not in ENTITY_TYPES:
             raise SpanError(f"Unknown entity type: {self.type!r}")
         if self.start < 0 or self.end <= self.start:
             raise SpanError(f"Invalid span [{self.start}, {self.end}) for {self.text!r}")
+        if self.polarity not in POLARITIES:
+            raise SpanError(f"Unknown polarity: {self.polarity!r}")
+        if self.polarity == "NEG" and self.type not in NEGATABLE_TYPES:
+            raise SpanError(
+                f"polarity='NEG' is only valid for {sorted(NEGATABLE_TYPES)}, "
+                f"got type={self.type!r}"
+            )
 
     def validate_against(self, source: str) -> None:
         if self.end > len(source):
@@ -41,7 +49,11 @@ class Entity:
             )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": self.type, "text": self.text, "start": self.start, "end": self.end}
+        return {
+            "type": self.type, "text": self.text,
+            "start": self.start, "end": self.end,
+            "polarity": self.polarity,
+        }
 
 
 @dataclass(slots=True)
