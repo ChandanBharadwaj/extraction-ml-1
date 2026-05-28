@@ -2,13 +2,19 @@
 optimizations (constant folding, node fusion). Quantization is intentionally
 NOT applied — the TDD prohibits INT8 because it degrades logits at token
 boundaries.
+
+The export also copies `preprocess.json` from the model dir to the same
+output directory so the serving artifact bundle (`model.onnx` + tokenizer
+files + `preprocess.json` + optional `thresholds.json`) is self-contained.
 """
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from ner.constants import MAX_SEQ_LEN
+from ner.preprocess import Preprocessor
 
 
 @dataclass
@@ -67,7 +73,14 @@ def export(config: ExportConfig) -> Path:
     )
 
     _optimize_graph(out_path)
+    _copy_preprocess_config(Path(config.model_dir), out_path.parent)
     return out_path
+
+
+def _copy_preprocess_config(model_dir: Path, serve_dir: Path) -> None:
+    src = model_dir / Preprocessor.CONFIG_FILENAME
+    if src.exists():
+        shutil.copy2(src, serve_dir / Preprocessor.CONFIG_FILENAME)
 
 
 def _optimize_graph(path: Path) -> None:

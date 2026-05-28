@@ -57,13 +57,14 @@ python -m scripts.infer --artifact-dir artifacts/serve --text "manifest contains
 Data flows through four stages that talk only through files:
 
 ```
-SQLite pool DB  --(slot_fill + noise)-->  train.jsonl
+SQLite pool DB  --(slot_fill + noise + preprocess)-->  train.jsonl
+                                              \---->  preprocess.json
                                               |
                                               v
-                                        HF Trainer  ----> artifacts/ckpt/  (PyTorch)
+                                        HF Trainer  ----> artifacts/ckpt/  (PyTorch + preprocess.json)
                                                             |
                                                             v
-                                                      onnx_export  ----> artifacts/serve/model.onnx
+                                                      onnx_export  ----> artifacts/serve/ (model.onnx + tokenizer + preprocess.json)
                                                                                   |
                                           tune_threshold(gold.jsonl)  ----> thresholds.json
                                                                                   |
@@ -72,8 +73,9 @@ SQLite pool DB  --(slot_fill + noise)-->  train.jsonl
 ```
 
 Each stage is a small, testable unit; the serving layer never imports torch
-or transformers. The runtime auto-loads `thresholds.json` from the artifact
-dir if present (absence is a no-op — classic argmax decoding).
+or transformers. The runtime auto-loads `thresholds.json` and
+`preprocess.json` from the artifact dir if present (each absence is a
+no-op — argmax decoding and identity preprocessing, respectively).
 
 ## Frozen contracts you must not break casually
 
@@ -105,6 +107,19 @@ These cross-cut multiple files; touching them requires changing all consumers.
    (35 hand-labeled records, offsets verified by Python) is the sole source
    of truth for early stopping and threshold tuning. Synthetic-to-real
    leakage breaks this guarantee.
+
+6. **Preprocessing is symmetric.** `ner.preprocess.Preprocessor` runs at
+   training time (after `apply_noise`, before JSONL write) AND at inference
+   time (before tokenization), with the **identical** `PreprocessConfig`
+   serialized as `preprocess.json` in the artifact bundle. At inference,
+   spans are decoded in cleaned coordinates and projected back to the raw
+   input's coordinate system via `PreprocessResult.project_entity` — so the
+   caller-visible offsets always index into the raw text they sent. The
+   preprocessor is intentionally conservative: NO casing changes, NO
+   punctuation removal, NO stop-word removal (entities contain "of/in/&";
+   prepositions are role signals; "no"/"not"/"without" are negation cues).
+   It DOES strip zero-width chars, fold Unicode whitespace variants, collapse
+   whitespace runs, and trim leading/trailing whitespace.
 
 ## Slot-fill template grammar
 
@@ -142,4 +157,5 @@ satisfies the floor (non-zero exit with diagnostics).
 - Adding a new noise transformation → `ner/data/noise.py` (honor `preserve_spans` and entity-surface guards; reproject offsets via `_apply_to_record`).
 - Adding new template patterns or pools → `sql/example_seed.sql` (real seeds drop in against `sql/schema.sql` — no schema change needed for new decoy slot names or qualified commodity values).
 - Tuning the serving operating point → `ner/eval/threshold_sweep.py` + `scripts/tune_threshold.py`.
+- Adding / changing a preprocessing step → `ner/preprocess.py` (must update the position map; train and inference will both adopt it via `preprocess.json`).
 - LLM data generation (Anthropic SDK with prompt caching, optional) → `ner/llm/claude_generator.py`.

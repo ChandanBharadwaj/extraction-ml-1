@@ -26,6 +26,7 @@ import numpy as np
 
 from ner.bio import apply_threshold_gate, bio_ids_to_spans, softmax
 from ner.constants import MAX_INPUT_CHARS, MAX_SEQ_LEN, NUM_LABELS
+from ner.preprocess import Preprocessor
 from ner.schema import Entity
 
 
@@ -39,6 +40,7 @@ class NERRuntimeConfig:
     inter_op_threads: int = 1
     providers: list[str] = field(default_factory=lambda: ["CPUExecutionProvider"])
     thresholds_path: str | None = None
+    preprocess_path: str | None = None  # path to preprocess.json; default config if None
 
 
 class NERRuntime:
@@ -51,6 +53,7 @@ class NERRuntime:
         self._session = self._build_session(ort)
         self._tokenizer = self._load_tokenizer()
         self.thresholds: np.ndarray | None = self._load_thresholds()
+        self.preprocessor: Preprocessor = self._load_preprocessor()
 
     def _build_session(self, ort: Any):
         opts = ort.SessionOptions()
@@ -78,6 +81,12 @@ class NERRuntime:
             return None
         from ner.eval.threshold_sweep import load_thresholds_json
         return load_thresholds_json(path)
+
+    def _load_preprocessor(self) -> Preprocessor:
+        path = self.config.preprocess_path
+        if path is not None and Path(path).exists():
+            return Preprocessor.load(path)
+        return Preprocessor()  # default config — no-op for already-clean text
 
     def _encode(self, text: str) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]]]:
         from tokenizers import Tokenizer
@@ -116,49 +125,78 @@ class NERRuntime:
         return bio_ids_to_spans(pred_ids, offsets, text)
 
     def predict(self, text: str) -> list[Entity]:
-        if len(text) > self.config.max_input_chars:
-            text = text[: self.config.max_input_chars]
-        input_ids, attention_mask, offsets = self._encode(text)
+        # Hard-truncate the *raw* input first so we never run the model on
+        # arbitrarily long text; preprocessing can only shrink things further.
+        original = text[: self.config.max_input_chars]
+        pre = self.preprocessor.clean(original)
+        if not pre.text:
+            return []
+        input_ids, attention_mask, offsets = self._encode(pre.text)
         logits = self._session.run(
             ["logits"],
             {"input_ids": input_ids, "attention_mask": attention_mask},
         )[0]
-        return self._decode_logits(logits[0], offsets, text)
+        cleaned_entities = self._decode_logits(logits[0], offsets, pre.text)
+        # Project spans back into the original-text coordinate system that
+        # the caller sent us. The surface form is re-sliced from `original`
+        # so `original[ent.start:ent.end] == ent.text` holds.
+        return [pre.project_entity(e, original) for e in cleaned_entities]
 
     def predict_batch(self, texts: list[str]) -> list[list[Entity]]:
         if not texts:
             return []
-        truncated = [t[: self.config.max_input_chars] for t in texts]
-        encoded = [self._encode(t) for t in truncated]
+        originals = [t[: self.config.max_input_chars] for t in texts]
+        pre_results = [self.preprocessor.clean(t) for t in originals]
+        cleaned_texts = [r.text for r in pre_results]
+
+        # Drop records that became empty after preprocessing so we don't waste
+        # a batch slot; we still need to return one list per input, so track
+        # which originals fed into the batch.
+        active_indices = [i for i, t in enumerate(cleaned_texts) if t]
+        results: list[list[Entity]] = [[] for _ in texts]
+        if not active_indices:
+            return results
+
+        active_texts = [cleaned_texts[i] for i in active_indices]
+        encoded = [self._encode(t) for t in active_texts]
         max_len = max(ids.shape[1] for ids, _, _ in encoded)
-        batch_ids = np.zeros((len(texts), max_len), dtype=np.int64)
-        batch_mask = np.zeros((len(texts), max_len), dtype=np.int64)
+        batch_ids = np.zeros((len(active_texts), max_len), dtype=np.int64)
+        batch_mask = np.zeros((len(active_texts), max_len), dtype=np.int64)
         all_offsets: list[list[tuple[int, int]]] = []
-        for i, (ids, mask, offsets) in enumerate(encoded):
+        for k, (ids, mask, offsets) in enumerate(encoded):
             n = ids.shape[1]
-            batch_ids[i, :n] = ids[0]
-            batch_mask[i, :n] = mask[0]
+            batch_ids[k, :n] = ids[0]
+            batch_mask[k, :n] = mask[0]
             padded_offsets = list(offsets) + [(0, 0)] * (max_len - n)
             all_offsets.append(padded_offsets)
         logits = self._session.run(
             ["logits"],
             {"input_ids": batch_ids, "attention_mask": batch_mask},
         )[0]
-        return [
-            self._decode_logits(logits[i], all_offsets[i], truncated[i])
-            for i in range(len(texts))
-        ]
+        for k, orig_idx in enumerate(active_indices):
+            cleaned_entities = self._decode_logits(
+                logits[k], all_offsets[k], active_texts[k],
+            )
+            pre = pre_results[orig_idx]
+            results[orig_idx] = [
+                pre.project_entity(e, originals[orig_idx]) for e in cleaned_entities
+            ]
+        return results
 
 
 def from_artifact_dir(artifact_dir: str | Path) -> NERRuntime:
     """Convenience loader: expects `model.onnx` and tokenizer files in
-    `artifact_dir`. If `thresholds.json` is present in the same directory,
-    it's loaded automatically and applied at decode time."""
+    `artifact_dir`. Auto-loads `thresholds.json` and `preprocess.json` from
+    the same directory if present; either absence is a no-op."""
     artifact_dir = Path(artifact_dir)
     thresholds_path: str | None = None
     candidate = artifact_dir / "thresholds.json"
     if candidate.exists():
         thresholds_path = str(candidate)
+    preprocess_path: str | None = None
+    pre_candidate = artifact_dir / Preprocessor.CONFIG_FILENAME
+    if pre_candidate.exists():
+        preprocess_path = str(pre_candidate)
     return NERRuntime(
         NERRuntimeConfig(
             onnx_path=str(artifact_dir / "model.onnx"),
@@ -166,5 +204,6 @@ def from_artifact_dir(artifact_dir: str | Path) -> NERRuntime:
             intra_op_threads=int(os.environ.get("ORT_INTRA_OP", "2")),
             inter_op_threads=int(os.environ.get("ORT_INTER_OP", "1")),
             thresholds_path=thresholds_path,
+            preprocess_path=preprocess_path,
         )
     )

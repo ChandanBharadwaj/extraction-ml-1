@@ -25,6 +25,9 @@ class TrainConfig:
     output_dir: str
     base_model: str = BASE_MODEL
     gold_jsonl: str | None = None  # None -> use built-in GOLD_SEED
+    # Path to preprocess.json (the same config the assembler used). If None,
+    # we look next to train_jsonl, then fall back to default Preprocessor().
+    preprocess_path: str | None = None
     epochs: int = 3
     per_device_train_batch_size: int = 32
     per_device_eval_batch_size: int = 32
@@ -51,6 +54,7 @@ def train(config: TrainConfig) -> Path:
 
     from ner.data.assembler import read_jsonl
     from ner.eval.gold import load_gold
+    from ner.preprocess import Preprocessor
     from ner.train.dataset import encode_records
     from ner.train.metrics import SpanF1Metric
 
@@ -65,6 +69,18 @@ def train(config: TrainConfig) -> Path:
     train_records = read_jsonl(config.train_jsonl)
     gold_records = load_gold(config.gold_jsonl)
 
+    # Resolve the preprocess config: explicit arg > sibling of train_jsonl >
+    # default. The same config is later saved into the model output dir so
+    # ONNX export + serving inherit it automatically.
+    preprocess_path = config.preprocess_path
+    if preprocess_path is None:
+        sibling = Path(config.train_jsonl).with_name(Preprocessor.CONFIG_FILENAME)
+        if sibling.exists():
+            preprocess_path = str(sibling)
+    preprocessor = (
+        Preprocessor.load(preprocess_path) if preprocess_path else Preprocessor()
+    )
+
     train_ds = Dataset.from_generator(
         encode_records,
         gen_kwargs={
@@ -73,10 +89,13 @@ def train(config: TrainConfig) -> Path:
             "max_length": config.max_seq_len,
         },
     )
+    # Project gold into the same cleaned coordinate system the training
+    # records live in. This *is* the eval set used for early stopping.
+    preprocessed_gold = preprocessor.apply_to_records(gold_records)
     eval_ds = Dataset.from_generator(
         encode_records,
         gen_kwargs={
-            "records": gold_records,
+            "records": preprocessed_gold,
             "tokenizer": tokenizer,
             "max_length": config.max_seq_len,
         },
@@ -109,11 +128,14 @@ def train(config: TrainConfig) -> Path:
         eval_dataset=eval_ds,
         data_collator=DataCollatorForTokenClassification(tokenizer),
         tokenizer=tokenizer,
-        compute_metrics=SpanF1Metric(tokenizer, gold_records),
+        compute_metrics=SpanF1Metric(tokenizer, gold_records, preprocessor),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=config.early_stopping_patience)],
     )
 
     trainer.train()
     trainer.save_model(config.output_dir)
     tokenizer.save_pretrained(config.output_dir)
+    # Persist the preprocess config alongside the model so export + serving
+    # pick it up automatically (symmetric with how `thresholds.json` flows).
+    preprocessor.save(Path(config.output_dir) / Preprocessor.CONFIG_FILENAME)
     return Path(config.output_dir)

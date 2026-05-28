@@ -1,4 +1,10 @@
-"""Top-level data pipeline: SQL -> Pools -> slot-fill -> noise -> JSONL."""
+"""Top-level data pipeline: SQL -> Pools -> slot-fill -> noise -> preprocess -> JSONL.
+
+Preprocessing runs *after* noise injection so the model trains on the same
+cleaned-text distribution it will see at inference. The `PreprocessConfig`
+chosen here must be saved alongside the trained model (via
+`Preprocessor.save`) so the runtime can apply the identical config.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +15,7 @@ from pathlib import Path
 from ner.data.noise import NoiseConfig, apply_noise
 from ner.data.pools import Pools, load_from_sqlite
 from ner.data.slot_fill import GenConfig, generate_records
+from ner.preprocess import PreprocessConfig, Preprocessor
 from ner.schema import Record
 
 
@@ -19,6 +26,8 @@ class AssemblerConfig:
     gen: GenConfig = field(default_factory=GenConfig)
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     apply_noise_prob: float = 0.6
+    preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
+    apply_preprocess: bool = True
 
 
 def assemble(
@@ -29,12 +38,16 @@ def assemble(
     config.gen.n_records = config.n_records
     clean = generate_records(pools, config.gen)
     rng = random.Random(config.seed + 1)
+    preprocessor = Preprocessor(config.preprocess) if config.apply_preprocess else None
     out: list[Record] = []
     for rec in clean:
         if rng.random() < config.apply_noise_prob:
-            out.append(apply_noise(rec, config.noise, rng))
-        else:
-            out.append(rec)
+            rec = apply_noise(rec, config.noise, rng)
+        if preprocessor is not None:
+            rec = preprocessor.apply_to_record(rec)
+            if not rec.text:
+                continue  # pathological case; skip
+        out.append(rec)
     return out
 
 
@@ -62,6 +75,12 @@ def assemble_from_sqlite(
     out_path: str | Path,
     config: AssemblerConfig,
 ) -> Path:
+    """Assemble synthetic data to JSONL and write `preprocess.json` next to it
+    so downstream training and serving can adopt the same cleaning config.
+    """
     pools = load_from_sqlite(sqlite_path)
     records = assemble(pools, config)
-    return write_jsonl(records, out_path)
+    out = write_jsonl(records, out_path)
+    if config.apply_preprocess:
+        Preprocessor(config.preprocess).save(out.parent / Preprocessor.CONFIG_FILENAME)
+    return out

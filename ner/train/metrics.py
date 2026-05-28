@@ -3,6 +3,10 @@
 We avoid seqeval here because seqeval scores at the token-tag level; the SLA is
 *exact char-offset spans*, so we decode predictions back to char spans before
 scoring against the gold validation records.
+
+Gold records are preprocessed with the same `Preprocessor` the runtime will
+use, so eval-time comparisons happen in cleaned coordinates — symmetric with
+how the model was trained.
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ import numpy as np
 
 from ner.bio import bio_ids_to_spans
 from ner.eval.metrics import evaluate
+from ner.preprocess import Preprocessor
 from ner.schema import Record
 
 if TYPE_CHECKING:
@@ -25,16 +30,24 @@ class SpanF1Metric:
         self,
         tokenizer: "PreTrainedTokenizerFast",
         gold_records: list[Record],
+        preprocessor: Preprocessor | None = None,
     ):
         self.tokenizer = tokenizer
-        self.gold = gold_records
+        self.preprocessor = preprocessor or Preprocessor()
+        # Project gold into cleaned coordinates ONCE so the eval cost is just
+        # tokenization + numpy. Records that get fully cleaned away are dropped.
+        self.gold: list[Record] = []
+        for r in gold_records:
+            cleaned = self.preprocessor.apply_to_record(r)
+            if cleaned.text:
+                self.gold.append(cleaned)
         self._encoded = [
             tokenizer(
                 r.text,
                 return_offsets_mapping=True,
                 truncation=True,
                 max_length=256,
-            ) for r in gold_records
+            ) for r in self.gold
         ]
 
     def __call__(self, eval_pred) -> dict[str, float]:
