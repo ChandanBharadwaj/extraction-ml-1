@@ -46,7 +46,9 @@ Pipeline CLIs (all installed as `python -m scripts.<name>`):
 
 ```bash
 # 1) Initialize a SQLite pool DB from sql/schema.sql + a seed .sql.
-python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/example_seed.sql
+#    sql/example_seed.sql is the tiny smoke seed; sql/seed.sql is the full
+#    production seed covering every docs/data_specification.md scenario.
+python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
 
 # 2) Generate synthetic training JSONL from the pool DB.
 python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
@@ -168,7 +170,7 @@ satisfies the floor (non-zero exit with diagnostics).
 
 - Changing what entities exist or how they're labeled → `ner/constants.py` + `ner/schema.py` (then run the full test suite to surface every consumer).
 - Adding a new noise transformation → `ner/data/noise.py` (honor `preserve_spans` and entity-surface guards; reproject offsets via `_apply_to_record`).
-- Adding new template patterns or pools → `sql/example_seed.sql` (real seeds drop in against `sql/schema.sql` — no schema change needed for new decoy slot names or qualified commodity values).
+- Adding new template patterns or pools → edit the source-of-truth Python modules in `scripts/seedgen/` (one per scenario family: `persons.py`, `orgs.py`, `addresses.py`, `commodities.py`, `decoys.py`, `templates.py`), then regenerate the SQL with `python -m scripts.build_seed`. The builder dedups, validates that every `{decoy:slot}` a template references has a backing pool, and emits both `sql/seed.sql` (SQLite) and `sql/postgres/seed.sql` (Postgres). `tests/test_seed_full.py` keeps the committed SQL in sync. The tiny `sql/example_seed.sql` is the smoke seed used by `tests/test_pools_sqlite.py`; leave it alone unless you mean to touch that test.
 - Tuning the serving operating point → `ner/eval/threshold_sweep.py` + `scripts/tune_threshold.py`.
 - Adding / changing a preprocessing step → `ner/preprocess.py` (must update the position map; train and inference will both adopt it via `preprocess.json`).
 - LLM data generation (Anthropic SDK with prompt caching, optional) → `ner/llm/claude_generator.py`.
