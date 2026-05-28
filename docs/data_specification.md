@@ -187,7 +187,424 @@ should over-sample these patterns (templates calibrated to weight).
 - Color / variety modifiers: `red wine`, `arabica coffee`, `organic cotton`.
 - Industry-specific jargon: `Brent crude`, `LME copper`, `LNG`.
 
+### 4.5 PERSON names — regional patterns and conventions
+
+Every dev/test split must include records from each region. Order column
+reflects the canonical written order in the home script; production text
+frequently appears in Western order regardless of origin — both forms are
+labeled. Diacritics, particles, and patronymics are part of the span.
+
+| Region / culture | Order | Example | Span-affecting notes |
+|---|---|---|---|
+| Anglo (US/UK/AU/NZ/CA) | Given + (middle) + family | `John Robert Smith` | Double-barreled `Smith-Jones`; titles excluded |
+| Anglo (Irish/Scottish) | Particle + family | `O'Brien`, `MacDonald`, `Mac an Bhaird` | Apostrophe variants; `Mc` vs `Mac` casing |
+| French | Given + family with particles | `Jean-Paul de la Croix` | `de`, `du`, `de la`, `le` particles in span |
+| Spanish | Given + paternal + maternal | `Juan García López` | Two surnames standard; `de`, `del` particles |
+| Portuguese (PT/BR) | Given + maternal + paternal | `João Silva Santos`, `Luiz Inácio Lula da Silva` | 3+ given names common; `da`, `dos`, `de` |
+| Italian | Given + family with particle | `Marco di Stefano` | `di`, `da`, `della`, `del` particles |
+| German / Austrian / Swiss-German | Given + family | `Hans Müller`, `Maria von Habsburg` | Umlauts `ä ö ü ß`; `von`, `zu`, `von der` |
+| Dutch / Flemish | Given + particle + family | `Pieter van der Berg` | Multi-word particles `van der`, `van den`, `van het` |
+| Swedish / Norwegian / Danish | Given + family | `Lars Eriksson`, `Astrid Hansen` | `-sson`, `-sen`, `-strup` endings |
+| Icelandic | Given + patronymic / matronymic | `Björk Guðmundsdóttir`, `Magnús Ólafsson` | `-son` / `-dóttir` derived from parent's given |
+| Finnish | Given + family | `Mika Häkkinen`, `Sanna Marin` | Umlauts; double consonants |
+| Polish | Given + family | `Wojciech Szczęsny`, `Anna Kowalska` | `-ski`/`-cki` (m), `-ska`/`-cka` (f); diacritics `ł ą ę ć ń ó ś ź ż` |
+| Czech / Slovak | Given + family | `Karel Novák`, `Marie Nováková` | Female form `-ová` suffix |
+| Hungarian | **Family + given** in source | `Bartók Béla` (HU) / `Béla Bartók` (West) | Document expected order at labeling time |
+| Russian | Given + patronymic + family | `Vladimir Ilyich Lenin` | `-ovich`/`-ovna` patronymic; `-ov`/`-ova` family |
+| Ukrainian | Given + family | `Volodymyr Zelenskyy` | `-enko`, `-uk`, `-yi`; transliteration varies |
+| Greek | Given + family | `Konstantinos Papadopoulos` | `-opoulos`, `-idis`, `-akis` |
+| Romanian | Given + family | `Ion Popescu` | `-escu`, `-eanu` |
+| Bulgarian / Serbian / Croatian | Given + family | `Goran Bregović`, `Ivan Petrov` | `-ić`, `-ov`, `-ev` |
+| Turkish | Given + family | `Mustafa Kemal Atatürk` | `ç ş ğ ı ö ü`; family names adopted 1934 |
+| Hebrew / Israeli | Given + family | `David ben Gurion`, `Tzipi Livni` | `ben` (son of), `bat` (daughter of) particles |
+| Arabic — Levantine / Gulf | Given + father + grandfather + tribal | `Mohammed bin Salman Al Saud` | `bin`/`ibn`, `bint`, `Al` (tribe), full chain in span |
+| Arabic — kunya form | Honorific + child-of-X | `Abu Mazen`, `Umm Khalid` | `Abu` (father of), `Umm` (mother of) |
+| Persian / Farsi | Given + (middle) + family | `Mohammad Ali Khamenei` | Family names ~1925; multi-part |
+| Chinese (Mandarin) | **Family + given** | `Wang Wei`, `Li Na` | Family 1–2 chars; Pinyin / Wade-Giles / Yale romanizations |
+| Chinese (Cantonese / HK) | Family + given (different romanization) | `Wong Ka-Wai`, `Chan Ho-Man` | Hyphenated given; Cantonese phonetics |
+| Japanese | **Family + given** (JP); reversed in West | `Yamamoto Tarō` / `Tarō Yamamoto` | Long marks `ō ū`; sometimes dropped to ASCII |
+| Korean | **Family + given** | `Kim Min-jun`, `Park Ji-sung` | Single-syllable family; hyphenated given; `Kim`/`Gim`, `Lee`/`Yi` variants |
+| Vietnamese | Family + middle + given | `Nguyễn Văn Anh` | `Nguyễn`, `Trần`, `Lê` top families; diacritics critical |
+| Thai | Given + family + (nickname) | `Somchai Sirikhom (Chai)` | Family names adopted 1913; very long names; nicknames in parens |
+| Indonesian / Malay | Mononym or given-only | `Sukarno`, `Joko Widodo` | One-word names common; `bin`/`binti` optional |
+| Filipino | Spanish-influenced; `y` between surnames | `Juan Dela Cruz`, `María Santos y Reyes` | `Dela`, `Del`, `De Los`, `Y` particles |
+| Indian — North | Given + family | `Aarav Kumar`, `Priya Sharma` | Families: `Kumar`, `Sharma`, `Singh`, `Gupta`, `Verma`, `Mishra`, `Tiwari` |
+| Indian — South Tamil | Initial(s) + given (no family) | `A.R. Rahman`, `M. Karunanidhi` | Initials = father's name / village; period spacing varies |
+| Indian — South Telugu / Kannada / Malayalam | Initial(s) + given | `K. Chandrasekhara Rao`, `M. K. Stalin` | Initials before given; multiple initials common |
+| Indian — Sikh | Given + Singh / Kaur (+ optional family) | `Harpreet Singh`, `Simran Kaur Sandhu` | `Singh` (m), `Kaur` (f) standard middle/last |
+| Indian — Bengali | Given + family | `Soumya Chakraborty`, `Rabindranath Tagore` | Long families: `Chakraborty`, `Banerjee`, `Mukherjee`, `Bhattacharya` |
+| Indian — Maharashtrian | Given + father's given + family | `Sachin Ramesh Tendulkar` | Three-part name common |
+| Indian — Gujarati / Parsi | Given + family | `Narendra Modi`, `Ratan Tata` | `Patel`, `Shah`, `Mehta`, `Tata` |
+| Pakistani | Given + (middle) + family / tribal | `Muhammad Ali Khan` | `Khan`, `Sheikh`, `Sayyid`, `Mirza`, `Qureshi` |
+| Sri Lankan Sinhala | Initial(s) + given + family | `D.M. Jayaratne` | Long compound families: `Wickremasinghe`, `Rajapaksa` |
+| Sri Lankan Tamil | Initial + given | `M. Karunanidhi` | Same pattern as Indian Tamil |
+| Bangladeshi | Given + family | `Sheikh Hasina`, `Md. Karim` | `Md.` for `Mohammad` very common (abbreviation in span) |
+| Nepalese / Bhutanese | Given + family | `Pushpa Kamal Dahal`, `Karma Lhamo` | Tibetan Buddhist & Hindu name traditions |
+| Yoruba (Nigeria) | Given + family | `Adeyemi Adebayo`, `Wole Soyinka` | `-yemi`, `-bayo`, `Ade-`, `Olu-` prefixes |
+| Igbo (Nigeria) | Given + family | `Chukwuemeka Ojukwu`, `Chinua Achebe` | `Chukwu-`, `Nna-`, `Ada-` prefixes |
+| Hausa | Given + father's given | `Mohammed Buhari`, `Aliyu Wamakko` | Islamic-influenced |
+| Ethiopian / Eritrean | Given + father's given (no family) | `Abebe Bikila`, `Haile Selassie`, `Tewodros Adhanom Ghebreyesus` | "Last name" = father's given; no Western family-name concept |
+| Somali | Triple patronymic | `Mohammed Abdullahi Mohammed` | Three given names: own + father + grandfather |
+| Swahili (East Africa) | Given + family | `Uhuru Kenyatta`, `Julius Nyerere` | Bantu + Arabic mix |
+| Afrikaans (South Africa) | Given + particle + family | `Jan van der Merwe`, `Pieter du Toit` | Dutch-derived particles |
+| Zulu / Xhosa / Sotho | Given + family | `Nelson Rolihlahla Mandela`, `Cyril Ramaphosa` | Click consonants in some names (`!`, `\|`, `c`, `q`, `x`) |
+| West African Francophone | Given + family | `Aminata Diallo`, `Aliou Touré`, `Ousmane Sembène` | French diacritics; families `Diallo`, `Touré`, `Diop`, `Cissé` |
+| Mexican | Given + paternal + maternal | `Carlos García Rodríguez`, `Frida Kahlo y Calderón` | Two surnames; `de` joiner; `Sr.`/`Jr.` |
+| Argentinian / Uruguayan | Italian-influenced; given + family | `Diego Armando Maradona`, `Lionel Andrés Messi` | Italian + Spanish mix |
+| Brazilian | Multiple given + maternal + paternal | `Luiz Inácio Lula da Silva` | Often 3+ given names; `da`, `dos`, `de` particles |
+| Cuban / Caribbean | Spanish + African mix | `Pedro Pérez Cabrera`, `Celia Cruz` | Compound surnames |
+| Indigenous Mesoamerican | Mayan / Nahuatl / Quechua names | `Cuauhtémoc`, `Atahualpa` | Often single name; modernized forms add Spanish surname |
+| Hawaiian | Given + family | `Kamehameha`, `Liliʻuokalani`, `Bernice Pauahi Bishop` | `ʻ` (okina) and macrons `ā ē ī ō ū` |
+| Maori (NZ) | Given + family | `Tāmaki Mākaurau`, `Witi Ihimaera` | Macrons; often single given name |
+| Polynesian (Samoan, Tongan, Fijian) | Given + family | `Sione Filitonga`, `Tupou Vaipulu` | Long, vowel-heavy |
+| Mixed-heritage / diasporic | Hyphenated or stacked | `Mary Chen-Smith`, `Lily Wong (Wang Lihua)` | Romanization + native parens common in dev set |
+
+### 4.6 PERSON honorifics, titles, and credentials
+
+Pre-name honorifics — **excluded from span** unless inextricable from the
+legal name:
+
+- **Western**: `Mr.`, `Mrs.`, `Ms.`, `Miss`, `Dr.`, `Prof.`, `Hon.`, `Rev.`, `Sir`, `Dame`, `Lord`, `Lady`, `Mx.`
+- **Religious**: `Father`/`Fr.`, `Sister`/`Sr.`, `Brother`/`Br.`, `Rabbi`, `Cantor`, `Imam`, `Sheikh`, `Bhante`, `Lama`, `Swami`, `Pope`
+- **Military / law-enforcement**: `Gen.`, `Maj.`, `Col.`, `Lt.`, `Capt.`, `Sgt.`, `Pvt.`, `Cpl.`, `Adm.`, `Cmdr.`, `Det.`, `Off.`
+- **Indian / South Asian**: `Shri`, `Sri`, `Smt.`, `Kumari`, `Pandit`, `Acharya`, `Swami`, `Babu`, `Sahib`
+- **Arabic / Islamic**: `Sheikh`, `Hajji`, `Sayyid`, `Mawlana`, `Hafiz`, `Mufti`
+- **Spanish / Latin**: `Don`, `Doña`, `Sr.`, `Sra.`, `Srta.`, `Lic.`, `Ing.`, `Arq.`
+- **German**: `Herr`, `Frau`, `Doktor`, `Professor`, `Doktor-Ingenieur` / `Dr.-Ing.`
+- **Japanese / Chinese / Korean address suffixes** (`-san`, `-sama`, `-sensei`, `-kun`, `-chan`, `-ssi`, `-nim`, `-laoshi`): excluded; almost always written separately
+- **Address-form prefixes**: `Dear`, `To`, `Attn:`, `c/o`
+
+Post-name elements:
+
+- **Generational** (included when no separating comma): `Jr.`, `Sr.`, `II`, `III`, `IV`, `V`. Example: `John Smith Jr.` → span includes `Jr.`; `John Smith, Jr.` → span ends at `Smith`.
+- **Academic / professional credentials** (excluded): `PhD`, `Ph.D.`, `MD`, `M.D.`, `DDS`, `DVM`, `JD`, `MBA`, `MS`, `BS`, `BA`, `RN`, `PE`, `CPA`, `CFA`, `CFP`, `Esq.`, `Esquire`, `LLM`, `LL.B.`
+- **Religious orders** (excluded): `OFM`, `SJ`, `OSB`
+- **Civil service** (excluded): `IAS`, `IPS`, `IFS`, `IRS` (Indian); `IES`
+- **Honours** (excluded): `OBE`, `MBE`, `CBE`, `KBE`, `KCMG`, `KCB`, `DSO`, `VC` (UK); `Bharat Ratna`, `Padma Bhushan` (India)
+- **Military post-name**: `(Ret.)`, `(USAF)`, `(USMC)` — excluded
+
+### 4.7 ORG legal-entity suffixes by jurisdiction
+
+Every dev/test split must include at least 5 records for each row of this
+table; the synthetic train pool must support all of them as decoys or
+legitimate suffixes. Periods, casing, and hyphens vary in production text
+— accept the variant forms; the canonical form is the row label.
+
+| Region | Suffixes | Notes |
+|---|---|---|
+| **USA** | `Inc.`, `Corp.`, `Co.`, `LLC`, `L.L.C.`, `LLP`, `LP`, `PC`, `P.C.`, `PLLC`, `PA`, `Holdings` | Periods optional in modern usage |
+| **UK** | `Ltd`, `Limited`, `PLC`, `plc`, `LLP`, `& Co.`, `Holdings` | `plc` is listed; `Ltd` is private |
+| **Ireland** | `Ltd`, `DAC`, `CLG`, `PLC`, `Teoranta` (Gaelic) | |
+| **Germany** | `GmbH`, `AG`, `KG`, `KGaA`, `OHG`, `SE`, `Stiftung`, `gGmbH`, `UG (haftungsbeschränkt)` | `UG` for low-capital |
+| **Austria** | `GmbH`, `AG`, `KG`, `OG`, `GesmbH` | |
+| **Switzerland** | `AG`, `SA`, `Sàrl`, `GmbH`, `Genossenschaft` | German / French / Italian variants |
+| **France** | `SA`, `SAS`, `SARL`, `SCA`, `SCS`, `EURL`, `SNC`, `SCEA`, `SCP` | `SAS`, `SARL` most modern |
+| **Belgium / Luxembourg** | `SA`, `SPRL`, `BVBA`, `CVBA`, `SCRL`, `NV`, `BV` | Bilingual |
+| **Netherlands** | `BV`, `NV`, `CV`, `Coöperatie`, `Stichting` | |
+| **Spain** | `S.A.`, `SA`, `S.L.`, `SL`, `SLU`, `Sdad. Coop.` | |
+| **Portugal** | `SA`, `Lda.`, `Sociedade Unipessoal` | `Lda.` ubiquitous |
+| **Italy** | `S.p.A.`, `S.r.l.`, `S.a.s.`, `S.n.c.`, `S.c.a.r.l.` | Periods usually present |
+| **Sweden** | `AB`, `HB`, `KB`, `ekonomisk förening` | `AB` covers most |
+| **Norway** | `AS`, `ASA`, `ANS`, `DA`, `BA` | |
+| **Denmark** | `A/S`, `ApS`, `K/S`, `I/S`, `P/S` | Forward slash in suffix |
+| **Finland** | `Oy`, `Oyj`, `Ky`, `Tmi`, `Osk` | `Oyj` listed; `Oy` private |
+| **Iceland** | `ehf.`, `hf.`, `slhf.`, `sf.` | |
+| **Poland** | `Sp. z o.o.`, `S.A.`, `Sp. j.`, `S.K.A.` | Long with internal spaces |
+| **Czech / Slovakia** | `s.r.o.`, `a.s.`, `k.s.`, `v.o.s.` | |
+| **Hungary** | `Kft.`, `Zrt.`, `Nyrt.`, `Bt.`, `Kkt.` | |
+| **Romania** | `SRL`, `SA`, `SCS`, `SCA`, `PFA` | |
+| **Greece** | `AE`, `EPE`, `OE`, `EE`, `IKE` | |
+| **Russia** | `OOO`, `OAO`, `PAO`, `ZAO`, `IP`, `AO` | Cyrillic + Latin variants (`ООО` ↔ `OOO`) |
+| **Ukraine** | `TOV`, `PrAT`, `PAT`, `FOP` | |
+| **Turkey** | `A.Ş.`, `Ltd. Şti.`, `S.M.M.M.` | `Şti.` = `Şirket`; non-ASCII `Ş` |
+| **Israel** | `Ltd`, `Bet"M`, `R.A.`, `Aguda` | Hebrew abbreviation `Bet"M` common |
+| **Saudi Arabia** | `Co. Ltd.`, `LLC`, `JSC` | Aramco state-owned |
+| **UAE** | `LLC`, `FZE`, `FZ-LLC`, `DMCC`, `JLT`, `PJSC` | Free-zone variants critical to coverage |
+| **Egypt** | `S.A.E.`, `LLC`, `Joint Stock Co.` | |
+| **Morocco / Algeria / Tunisia** | `SA`, `SARL`, `SCA` | French-derived |
+| **Nigeria** | `Plc`, `Ltd`, `Co. Ltd.` | |
+| **Kenya** | `Ltd`, `Limited`, `Plc`, `Co.` | |
+| **South Africa** | `Pty Ltd`, `(Pty) Ltd`, `Proprietary Limited`, `Ltd`, `Inc.`, `CC` | `CC` = close corporation |
+| **Ghana** | `Ltd`, `Plc`, `Co. Ltd.` | |
+| **China (mainland)** | `Co., Ltd.`, `公司`, `有限公司`, `集团` (Group), `控股` (Holdings) | English + Chinese name often both present |
+| **Hong Kong** | `Ltd`, `Limited`, `Co. Ltd.`, `(HK)` | Bilingual EN/ZH |
+| **Taiwan** | `Co., Ltd.`, `Inc.`, `股份有限公司` | |
+| **Japan** | `K.K.` (株式会社), `Co., Ltd.`, `Inc.`, `Y.K.` (有限会社), `G.K.` (合同会社) | `G.K.` is LLC-equivalent |
+| **South Korea** | `Co., Ltd.`, `Inc.`, `Corp.`, `주식회사` | Chaebol naming pattern |
+| **Singapore** | `Pte Ltd`, `Pte. Ltd.`, `Limited`, `Pte`, `LLP` | `Pte` private, `Limited` public |
+| **Malaysia** | `Sdn. Bhd.`, `Sdn Bhd`, `Berhad`, `Bhd.`, `PLT` | `Sdn Bhd` private; `Berhad` public |
+| **Indonesia** | `PT`, `PT.`, `Tbk`, `Persero`, `CV` | `PT` prefix (uncommon position); `Tbk` listed |
+| **Philippines** | `Inc.`, `Corp.`, `Corporation`, `Ltd.` | |
+| **Thailand** | `Co., Ltd.`, `PCL`, `บริษัท ... จำกัด` | Thai script in legal name |
+| **Vietnam** | `Ltd.`, `JSC`, `Co., Ltd.` | |
+| **India** | `Pvt. Ltd.`, `Pvt Ltd`, `Private Limited`, `Ltd`, `Limited`, `LLP` | `Pvt. Ltd.` ubiquitous |
+| **Pakistan** | `Pvt. Ltd.`, `(Pvt) Limited`, `Ltd`, `(SMC-Pvt) Ltd.` | |
+| **Sri Lanka** | `PLC`, `Ltd`, `(Pvt) Ltd` | |
+| **Bangladesh** | `Ltd.`, `Limited`, `(Pvt.) Ltd.`, `Group` | |
+| **Brazil** | `Ltda.`, `S.A.`, `S/A`, `EIRELI`, `ME`, `EPP` | `S/A` forward-slash variant common |
+| **Mexico** | `S.A.`, `S.A. de C.V.`, `S. de R.L. de C.V.`, `S.A.B. de C.V.` | `S.A.B.` listed |
+| **Argentina** | `S.A.`, `SRL`, `SAS`, `Coop. Ltda.` | |
+| **Chile** | `S.A.`, `Ltda.`, `SpA`, `EIRL` | |
+| **Colombia** | `S.A.`, `S.A.S.`, `Ltda.` | `S.A.S.` is the modern default |
+| **Peru** | `S.A.`, `S.A.C.`, `S.R.L.`, `E.I.R.L.` | |
+| **Venezuela** | `C.A.`, `S.A.`, `S.R.L.` | `C.A.` = Compañía Anónima |
+| **Canada** | `Inc.`, `Ltd.`, `Corp.`, `ULC`, `LLP` | English + French (e.g. `Ltée`) |
+| **Australia** | `Pty Ltd`, `Pty. Ltd.`, `Limited`, `Ltd`, `Pty.` | |
+| **New Zealand** | `Ltd`, `Limited` | |
+
+### 4.8 BRAND naming patterns
+
+Brand class is folded into ORG in this system (Section 1 of the design
+record). The cases below must still be coverable as ORG spans; the
+modifier-on-commodity pattern needs special attention.
+
+**Single-token brands by casing convention:**
+
+- All-lowercase by design: `eBay`, `iPhone`, `iPad`, `nike` (marketing), `mRNA`
+- All-uppercase by design: `IBM`, `IKEA`, `BMW`, `BBVA`, `LG`, `HSBC`, `KFC`, `UNIQLO`, `ASML`, `BASF`
+- CamelCase: `PayPal`, `WeChat`, `FedEx`, `YouTube`, `GitHub`, `LinkedIn`, `OpenAI`, `EasyJet`, `JetBlue`, `MasterCard`, `MetLife`
+- Initial-lowercase CamelCase: `eBay`, `iPhone`, `iPod`, `mRNA`
+- Vowel-light marketing: `Lyft`, `Tumblr`, `Flickr`, `Grindr`, `Fivvr`, `Rappi`
+
+**Multi-word brands:**
+
+- Hyphenated: `Coca-Cola`, `Bristol-Myers Squibb`, `Häagen-Dazs`, `Mercedes-Benz`, `Hewlett-Packard`, `Wal-Mart`
+- Ampersand: `Procter & Gamble`, `Johnson & Johnson`, `Marks & Spencer`, `Dolce & Gabbana`, `H&M`, `AT&T`, `A&W`, `Ben & Jerry's`
+- Slash: `S/MIME`, `OS/2`, `B/E Aerospace`
+- Apostrophe: `McDonald's`, `Wendy's`, `Macy's`, `Sotheby's`, `Levi's`, `Hershey's`, `Reese's`
+- Quoted: `Toys "R" Us`, `Books "A" Million`
+- Exclamation: `Yahoo!`, `Reach!`
+- Special chars: `E*TRADE`, `Joe's*Coffee`, `Asahi+`
+- "The" prefix in legal name: `The North Face`, `The Coca-Cola Company`, `The Home Depot`, `The Boeing Company`, `The Walt Disney Company`
+- Possessive: `Levi's`, `Macy's`, `Wendy's`, `Hershey's`, `Domino's`
+
+**Numbered brands:**
+
+- Leading number: `3M`, `7-Eleven`, `7-Up`, `21st Century Fox`, `99 Cents Only`, `5 Guys`
+- Trailing number: `Forever 21`, `Heinz 57`, `Channel 4`
+- Embedded number: `B&Q`, `J2`, `A1`
+
+**Brands with foreign diacritics / non-ASCII:**
+
+- French: `L'Oréal`, `Nestlé`, `Citroën`, `Renault`, `Carrefour`, `Crédit Agricole`
+- Spanish: `Telefónica`, `BBVA`, `Inditex`, `Volkswagen España`
+- German: `Müller`, `Lufthansa`, `Henkel`, `Bayer`, `Beiersdorf`
+- Scandinavian: `Häagen-Dazs` (faux-Danish), `LEGO`, `Volvo`, `Ericsson`, `Spotify`, `IKEA`, `Ørsted`
+- Japanese romanized: `Asahi`, `Kirin`, `Sapporo`, `Toyota`, `Honda`, `Mitsubishi`, `Sumitomo`, `Sumitomo Mitsui`
+- Mandarin pinyin: `Huawei`, `Xiaomi`, `Lenovo`, `BYD`, `Geely`, `Haier`, `Alibaba`, `Tencent`
+- Korean: `Samsung`, `LG`, `Hyundai`, `Kia`, `SK Hynix`, `POSCO`
+- Russian / Cyrillic both forms: `Gazprom` / `Газпром`, `Lukoil` / `Лукойл`, `Sberbank` / `Сбербанк`, `Yandex` / `Яндекс`
+- Arabic transliteration: `Aramco`, `Emirates`, `Etihad`, `Al-Futtaim`, `Al-Rajhi`, `STC`, `Saudi Telecom`
+- Indian: `Tata`, `Reliance`, `Infosys`, `Wipro`, `Mahindra`, `Bharti Airtel`, `Adani`, `JSW`
+
+**Brand portfolios — parent vs sub-brand:**
+
+| Parent ORG | Sub-brands typically extracted as ORG (treated equivalently) |
+|---|---|
+| Apple Inc. | `Apple`, `iPhone`, `iPad`, `Mac`, `Apple Watch`, `MacBook` |
+| Alphabet / Google | `Google`, `YouTube`, `Waymo`, `Verily`, `DeepMind`, `Pixel` |
+| Meta Platforms | `Facebook`, `Instagram`, `WhatsApp`, `Messenger`, `Threads` |
+| Procter & Gamble | `Tide`, `Pampers`, `Gillette`, `Olay`, `Crest`, `Bounty`, `Pantene`, `Vicks` |
+| Unilever | `Dove`, `Knorr`, `Lipton`, `Hellmann's`, `Magnum`, `Axe`, `Surf`, `Lux` |
+| PepsiCo | `Pepsi`, `Lay's`, `Doritos`, `Quaker`, `Gatorade`, `Tropicana`, `Mountain Dew` |
+| Nestlé S.A. | `Nescafé`, `KitKat`, `Maggi`, `Häagen-Dazs`, `Perrier`, `Purina`, `Gerber` |
+| Tata Group | `Tata Steel`, `TCS`, `Tata Motors`, `Jaguar Land Rover`, `Tata Consumer Products` |
+| Samsung Group | `Samsung Electronics`, `Samsung C&T`, `Samsung Heavy Industries`, `Samsung SDS` |
+| LVMH | `Louis Vuitton`, `Dior`, `Givenchy`, `Tiffany & Co.`, `Sephora`, `Bulgari`, `Fendi` |
+
+**Brand-as-modifier on a commodity** (the disambiguation case from the design conversation):
+
+- `Apple iPhone shipment` → ORG `Apple`, COMMODITY `iPhone` *(or* COMMODITY `Apple iPhone` *if product spans are merged; the rubric must pick one and stay consistent)*
+- `Toyota Camry, 10 units` → ORG `Toyota`, COMMODITY `Camry`
+- `Coca-Cola syrup, 500 kg` → ORG `Coca-Cola`, COMMODITY `syrup`
+- `Häagen-Dazs ice cream` → ORG `Häagen-Dazs`, COMMODITY `ice cream`
+- `Nestlé chocolate` → ORG `Nestlé`, COMMODITY `chocolate`
+- `Patagonia jackets` → ORG `Patagonia`, COMMODITY `jackets`
+
+### 4.9 ORG / BRAND / PERSON fuzzy and messy variants
+
+Every variant pattern below must appear in dev/test. None of these are
+"optional cleanup" cases — all of them are present in real production
+inputs and the model has to handle them.
+
+**Casing variants** (same legal name, different surface form):
+
+| Canonical | Variant | Source |
+|---|---|---|
+| `Acme Trading Co.` | `ACME TRADING CO.` | OCR'd letterhead |
+| `Acme Trading Co.` | `acme trading co` | Fast-typed email |
+| `Acme Trading Co.` | `Acme Trading CO` | Mixed casing |
+| `Acme Trading Co.` | `Acme trading co.` | Sentence-case mid-sentence |
+| `IBM` | `Ibm`, `ibm`, `IBM.` | Capitalized as if a regular word |
+| `iPhone` | `IPhone`, `iphone`, `IPHONE` | Wrong CamelCase variants |
+| `eBay` | `Ebay`, `EBAY`, `ebay` | All variants present in invoices |
+| `Maria Gonzalez` | `MARIA GONZALEZ`, `maria gonzalez`, `Maria GONZALEZ` | OCR / shouting / mixed |
+
+**Punctuation drift in suffixes:**
+
+| Canonical | Variants |
+|---|---|
+| `Inc.` | `Inc`, `INC`, `Incorporated`, `Inc,`, `Inc..` |
+| `Co.` | `Co`, `Company`, `Comp.`, `C/o` |
+| `Ltd.` | `Ltd`, `LTD`, `Limited`, `Ltd,` |
+| `& Co.` | `and Co.`, `and Company`, `& Company`, `&Co.` |
+| `S.A.` | `SA`, `S.A`, `S. A.`, `S/A` |
+| `Pvt. Ltd.` | `Pvt Ltd`, `PVT LTD`, `(P) Ltd.`, `Pvt.Ltd.`, `P. Ltd.` |
+| `Sdn. Bhd.` | `Sdn Bhd`, `Sdn.Bhd.`, `Sdn-Bhd`, `SDN BHD` |
+| `Pte Ltd` | `Pte. Ltd.`, `Pte Ltd.`, `PTE LTD`, `Pte.Ltd` |
+| `GmbH` | `gmbh`, `GMBH`, `G.m.b.H.` |
+| `S.A. de C.V.` | `SA de CV`, `S.A. de CV`, `S.A.deC.V.` |
+
+**Whitespace and separator drift:**
+
+| Canonical | Variants |
+|---|---|
+| `Bristol-Myers Squibb` | `Bristol Myers Squibb`, `Bristol—Myers Squibb` (em-dash), `BristolMyers Squibb`, `Bristol  Myers  Squibb` |
+| `Mercedes-Benz` | `Mercedes Benz`, `Mercedes-benz`, `MercedesBenz` |
+| `Procter & Gamble` | `Procter and Gamble`, `Procter&Gamble`, `Procter &Gamble`, `Procter & gamble`, `Procter and gamble` |
+| `Toys "R" Us` | `Toys R Us`, `Toys 'R' Us`, `Toys “R” Us` (smart quotes), `ToysRUs` |
+| `Coca-Cola` | `Coca Cola`, `coca-cola`, `CocaCola`, `COCA-COLA`, `Coca‑Cola` (non-breaking hyphen) |
+| `H&M` | `H & M`, `H and M`, `h&m`, `H AND M` |
+| `Häagen-Dazs` | `Haagen-Dazs` (diacritic dropped), `Haagen Dazs`, `HAAGEN-DAZS`, `Häagen Dazs` |
+| `L'Oréal` | `LOreal`, `L'Oreal` (accent dropped), `L Oreal`, `L'Oreal`, `L`Oreal` (smart quote) |
+| `Maria Gonzalez` | `MariaGonzalez`, `Maria  Gonzalez` (double space), `Maria Gonzalez` (NBSP between) |
+
+**Apostrophe variants** (straight, curly, missing, replaced):
+
+| Canonical | Variants |
+|---|---|
+| `McDonald's` | `McDonalds`, `Mcdonalds`, `McDonald's` (curly `’`), `MCDONALD'S`, `MCDONALDS`, `McDonalds'` |
+| `O'Brien & Co.` | `OBrien & Co.`, `O'Brien & Co.` (curly), `O Brien & Co.`, `O`Brien & Co.` |
+| `Sotheby's` | `Sothebys`, `SOTHEBYS`, `Sotheby's` (curly) |
+
+**Abbreviation / acronym variants:**
+
+| Long form | Variants |
+|---|---|
+| `International Business Machines Corporation` | `IBM`, `Int'l Business Machines`, `Internat'l Business Machines Corp.`, `I.B.M.` |
+| `J.P. Morgan Chase & Co.` | `JPMorgan Chase`, `JP Morgan`, `J.P.Morgan`, `JPMorganChase`, `JPM` |
+| `Bank of America Corporation` | `BofA`, `Bank of America`, `BoA`, `B of A`, `BAC` |
+| `Hewlett-Packard Company` | `HP`, `Hewlett Packard`, `H-P`, `HPE` (post-split entity), `Hewlett-Packard Co.` |
+| `Standard Chartered Bank` | `StanChart`, `Standard Chartered`, `SCB`, `Standard Chartered plc` |
+| `Industrial and Commercial Bank of China` | `ICBC`, `工商银行`, `Industrial & Commercial Bank` |
+| `Tata Consultancy Services` | `TCS`, `Tata Consultancy`, `Tata Consultancy Services Ltd` |
+
+**Brand vs legal name** (production text mixes both freely; both must be labeled):
+
+| Brand (informal) | Legal name (formal) |
+|---|---|
+| `Google` | `Alphabet Inc.` / `Google LLC` |
+| `Facebook` | `Meta Platforms, Inc.` |
+| `Pringles` | `Kellanova` (formerly `Kellogg Company`) |
+| `Snickers` | `Mars, Incorporated` |
+| `Doritos` | `Frito-Lay, Inc.` / `PepsiCo, Inc.` |
+| `iPhone` | `Apple Inc.` |
+| `KitKat` (rest of world) | `Nestlé S.A.` |
+| `KitKat` (US only) | `The Hershey Company` |
+| `Oreo` | `Mondelēz International` |
+
+**OCR-specific corruption (ORG / BRAND):**
+
+| Original | OCR'd | Fault |
+|---|---|---|
+| `Acme` | `Acrne` | `m` → `rn` ligature confusion |
+| `Co.` | `Cu.`, `Co,` | `o` → `u`, period → comma |
+| `Ltd` | `Lid`, `Ltd` (l→1), `Ld`, `LtcI` | char confusion |
+| `IBM` | `1BM`, `IBN`, `lBM`, `IRM` | `I` ↔ `1` ↔ `l`; `M` ↔ `N` ↔ `R` |
+| `Patagonia` | `Pat agonia`, `Pat-agonia` | spurious space / hyphen |
+| `Microsoft` | `MicroSoft`, `Micro soft`, `Microscft` | case / split / `o`→`c` |
+| `Sumitomo` | `Sumltomo`, `Sumttomo` | `i` confusion |
+| `Häagen-Dazs` | `Haaqen-Dazs` | `g` → `q` |
+| `Aramco` | `Aramoo`, `Aramcc` | `c`/`o` confusion |
+
+**Romanization / transliteration pairs** (both labeled when both appear in source):
+
+| Canonical (English) | Variants |
+|---|---|
+| `Sinopec` | `China Petroleum & Chemical Corporation`, `中国石化` |
+| `Gazprom` | `Газпром`, `OAO Gazprom`, `PJSC Gazprom`, `Public Joint Stock Company Gazprom` |
+| `Lukoil` | `Лукойл`, `LUKOIL`, `OOO Lukoil`, `PAO Lukoil` |
+| `Huawei` | `华为`, `HUAWEI`, `Huawei Technologies Co., Ltd.` |
+| `Samsung` | `삼성`, `Samsung Electronics Co., Ltd.`, `SEC` |
+| `Toyota` | `トヨタ`, `Toyota Motor Corporation`, `TMC`, `Toyota Jidosha` |
+| `Hitachi` | `日立`, `Hitachi, Ltd.`, `(株) 日立製作所` |
+| `Tata` | `Tata Group`, `Tata Sons Pvt. Ltd.`, `टाटा` |
+| `Mitsubishi` | `三菱`, `Mitsubishi Corporation`, `Mitsubishi Shoji` |
+| `Reliance` | `Reliance Industries`, `Reliance Industries Limited`, `RIL`, `रिलायंस` |
+
+**Subsidiary / branch / division in the name** (single ORG span when contiguous):
+
+- `Acme Trading (Singapore) Pte. Ltd.`
+- `BNP Paribas Hong Kong Branch`
+- `Mitsubishi Corporation (Americas)`
+- `Acme Trading Asia-Pacific Pte. Ltd.`
+- `Citi Private Bank, London`
+- `Deutsche Bank AG, Frankfurt`
+- `Standard Chartered Bank (Hong Kong) Limited`
+- `HSBC India`, `HSBC (UK)`
+
+**Joint-venture / DBA / trade-as patterns:**
+
+- `Acme-XYZ Joint Venture` → single ORG span
+- `Acme/XYZ JV` → single ORG span
+- `Acme Trading dba Speedy Logistics` → two ORG spans (legal + DBA); document rubric choice
+- `Acme Trading t/a Speedy Logistics` → UK "trading as" style
+- `Renault-Nissan-Mitsubishi Alliance` → single ORG span (formal alliance)
+- `BP-Rosneft JV`
+
+**State-owned / national champion ORGs** (long official + short common form, both labeled):
+
+| Common | Official |
+|---|---|
+| `China National Petroleum` / `CNPC` | `China National Petroleum Corporation` |
+| `Aramco` / `Saudi Aramco` | `Saudi Arabian Oil Company` |
+| `Petrobras` | `Petróleo Brasileiro S.A.` |
+| `Pemex` | `Petróleos Mexicanos` |
+| `ONGC` | `Oil and Natural Gas Corporation Limited` |
+| `BHEL` | `Bharat Heavy Electricals Limited` |
+| `EDF` | `Électricité de France` |
+| `SNCF` | `Société nationale des chemins de fer français` |
+| `KEPCO` | `Korea Electric Power Corporation` |
+| `Equinor` (post-2018) | `Statoil` (pre-rename) — historical rename pairs are in scope |
+| `Meta` (post-2021) | `Facebook, Inc.` |
+| `Alphabet` | `Google Inc.` (pre-reorg) |
+
+**Bilingual / dual-script ORG names** (both halves often appear together in source; label the form the source uses, treat as one ORG span when contiguous):
+
+- `Mitsubishi 三菱` → one ORG span if hyphenless and contiguous
+- `Samsung 삼성電子` → one ORG span
+- `中国移动 China Mobile` → one ORG span
+- `HSBC 汇丰银行` → one ORG span
+- `LVMH Moët Hennessy Louis Vuitton` → one ORG span
+
+**Fuzzy PERSON variants** (every one of these patterns must appear in dev with the correct gold span):
+
+| Canonical | Variants |
+|---|---|
+| `Maria Gonzalez` | `MARIA GONZALEZ`, `maria gonzalez`, `MariaGonzalez`, `Maria  Gonzalez`, `Maria Gonzlaez` (typo), `Mria Gonzalez` (dropped char), `Ma1ia Gonzalez` (OCR 1↔r) |
+| `Søren Hansen` | `Soren Hansen` (diacritic dropped), `Sören Hansen` (wrong umlaut), `SOREN HANSEN`, `S. Hansen` (initial only) |
+| `María Muñoz` | `Maria Munoz`, `MARÍA MUÑOZ`, `MARIA MUNOZ`, `M. Muñoz`, `Maria Munhoz` (typo) |
+| `J.K. Rowling` | `JK Rowling`, `J K Rowling`, `J. K. Rowling`, `J.K Rowling`, `J.K.Rowling` (no spaces) |
+| `O'Brien` | `OBrien`, `O'Brien` (curly), `O Brien`, `O`Brien` (smart quote) |
+| `Mary-Kate` | `Mary–Kate` (en-dash), `Mary—Kate` (em-dash), `MaryKate`, `Mary Kate` |
+| `Mao Zedong` | `Mao Tse-tung` (Wade-Giles), `Mao Ze-Dong`, `毛泽东`, `MAO ZEDONG`, `Mao, Zedong` (reversed-with-comma) |
+| `Gonzalez, Maria` | reversed CSV order; comma must NOT be inside the span — rubric handles separator |
+| `Maria Gonzalez (CEO)` | parenthetical role excluded from span; span = `Maria Gonzalez` |
+| `-- Maria Gonzalez` | email-signature artifact; span = `Maria Gonzalez` |
+| `Dear Maria,` | salutation form; span = `Maria` |
+| `Md. Karim` | abbreviation `Md.` (for Mohammad) **included** in span |
+| `A.R. Rahman` | initial-prefix structure; span includes both initials and given |
+| `Harpreet Singh` | `Singh` middle/last included as part of span |
+
+**Truncation patterns** (real OCR / API payload artifacts):
+
+- `Maria Gonz…` (ellipsis cut) → span = `Maria Gonz` (truncated text matches; partial entity)
+- `Acme Tradi` (mid-word cut) → span = `Acme Tradi` (or rejected by annotator as too ambiguous; document choice)
+- `International Business Machines Corp` (last char missing) → span = full text shown
+- `42 Industrial Park Road, Rotterda` (city cut mid-word) → ADDRESS span as shown
+
 ---
+
 
 ## 5. Negation coverage (COMMODITY only)
 
