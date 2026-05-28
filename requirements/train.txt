@@ -1,0 +1,9 @@
+torch>=2.3
+transformers>=4.44
+datasets>=2.20
+accelerate>=0.33
+seqeval>=1.2.2
+onnx>=1.16
+onnxruntime>=1.18
+tokenizers>=0.20
+numpy>=1.26

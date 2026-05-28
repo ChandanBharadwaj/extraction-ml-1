@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+venv/
+
+# Artifacts (top-level only — don't shadow ner/data, etc.)
+/data/
+/artifacts/
+*.onnx
+*.sqlite
+*.jsonl
+!sql/example_seed.sql
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
