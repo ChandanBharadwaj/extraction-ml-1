@@ -2,8 +2,9 @@
 
 Each submodule exports plain Python lists/dicts of *surface strings* (no SQL
 escaping, no char offsets). `scripts.build_seed` imports them, deduplicates,
-validates template/decoy-slot consistency, and emits the SQLite and Postgres
-seed SQL files (`sql/seed.sql`, `sql/postgres/seed.sql`).
+validates template/decoy-slot consistency, and emits the Postgres seed SQL
+file (`sql/postgres/seed.sql`) loaded into the warehouse by
+`scripts.init_postgres`.
 
 Contract for the slot-fill grammar (see ner/data/slot_fill.py):
   - Entity pool values are the *exact gold span text* a template inserts and

@@ -11,14 +11,14 @@ exporting, and serving. For the *why* behind each stage see `README.md` and
 
 - **Python 3.10+** (3.11 recommended).
 - **git**.
-- **Docker + Docker Compose** — optional, only needed for the Postgres path
-  (§6). The default SQLite path needs no Docker.
+- **Docker + Docker Compose** — required. Pools *and* gold live in Postgres;
+  there is no SQLite fallback.
 
 Check:
 
 ```bash
 python --version        # >= 3.10
-docker --version        # optional
+docker --version
 ```
 
 ---
@@ -43,56 +43,66 @@ What each path actually needs:
 
 | You want to…                                  | Install            |
 |-----------------------------------------------|--------------------|
-| Generate synthetic data / run the seed (§3–5) | nothing extra — the data core (`ner.data.slot_fill`, `ner.data.pools`, `ner.schema`) is **pure stdlib** |
+| Seed Postgres / generate synthetic data (§3–4)| `.[data]` (psycopg) + a running Postgres |
+| Inspect pools / generate records offline      | nothing extra — `build_seed.build_pools()` is **pure stdlib** (no DB) |
 | Run the full test suite                       | `.[dev]` **and** `.[inference]` (a few tests `import numpy`) |
 | Train a model                                 | `.[train]`         |
 | Export to ONNX                                | `.[train]`         |
 | Serve / run inference                         | `.[inference]`     |
-| Use the Postgres warehouse                    | `.[data]`          |
 
 > The serving runtime is intentionally torch-free. You only need `.[train]` to
 > produce a checkpoint and ONNX file; production serving runs on `.[inference]`.
 
 ---
 
-## 3. Seed the pools (SQLite — the default, no Docker)
+## 3. Seed the pools (Postgres via Docker)
 
-The data layer is driven by a SQLite DB matching `sql/schema.sql`, populated
-from a seed `.sql`. Two seeds ship in the repo:
+Pools live in Postgres — the single source of truth (no SQLite). Start the
+container and load the seed:
 
-- `sql/example_seed.sql` — tiny smoke seed (used by `tests/test_pools_sqlite.py`).
-- `sql/seed.sql` — **full production seed** covering every scenario in
+```bash
+docker compose up -d                                            # Postgres @ localhost:6655
+pip install -e .[data]                                          # psycopg driver
+python -m scripts.init_postgres --seed sql/postgres/seed.sql    # schema + full production seed
+python -m scripts.init_postgres --verify                        # row counts + coverage view
+```
+
+Two seeds ship in the repo:
+
+- `sql/postgres/example_seed.sql` — tiny smoke seed (the default if you omit
+  `--seed`).
+- `sql/postgres/seed.sql` — **full production seed** covering every scenario in
   `docs/data_specification.md` (≈2,400 entity values, 16 decoy slots, ~200
   templates).
 
-Initialize a pool DB from the full seed:
+The DSN defaults to `postgresql://ner:ner@localhost:6655/multi_entity_ner`;
+override with `--dsn` or the `DATABASE_URL` env var.
+
+### Regenerating the seed
+
+`sql/postgres/seed.sql` is **generated** from the Python source-of-truth modules
+in `scripts/seedgen/` (one per scenario family: `persons.py`, `orgs.py`,
+`addresses.py`, `commodities.py`, `decoys.py`, `templates.py`). Edit those, then:
 
 ```bash
-python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
-```
-
-### Regenerating the full seed
-
-`sql/seed.sql` and `sql/postgres/seed.sql` are **generated** from the Python
-source-of-truth modules in `scripts/seedgen/` (one per scenario family:
-`persons.py`, `orgs.py`, `addresses.py`, `commodities.py`, `decoys.py`,
-`templates.py`). Edit those, then rebuild both SQL dialects:
-
-```bash
-python -m scripts.build_seed            # writes sql/seed.sql + sql/postgres/seed.sql
+python -m scripts.build_seed            # writes sql/postgres/seed.sql
 python -m scripts.build_seed --check    # validate only (no files written)
 ```
 
 The builder dedups, validates that every `{decoy:slot}` a template references
 has a backing pool, and escapes apostrophes / newlines / non-ASCII correctly.
+Reload it with `init_postgres --seed sql/postgres/seed.sql` (idempotent —
+`ON CONFLICT DO NOTHING`).
 
 ---
 
 ## 4. Generate synthetic training data
 
+Reads pools from Postgres (connection: `--postgres-dsn`, else `$DATABASE_URL`,
+else the default local DSN):
+
 ```bash
 python -m scripts.generate_data \
-    --sqlite data/pools.sqlite \
     --out data/train.jsonl \
     --n 50000 --seed 42 --noise-prob 0.6
 ```
@@ -102,13 +112,14 @@ in Python, so `text[start:end] == entity.text` is a hard invariant. A
 `preprocess.json` is written next to `train.jsonl` so training and serving share
 the identical preprocessing config.
 
-Quick peek at a few generated rows (no extra deps required):
+Quick peek at a few generated rows **without a database** (builds `Pools`
+straight from the seedgen modules — no extra deps):
 
 ```bash
 python - <<'PY'
-from ner.data.pools import load_from_sqlite
+from scripts.build_seed import build_pools
 from ner.data.slot_fill import GenConfig, generate_records
-pools = load_from_sqlite("data/pools.sqlite")
+pools = build_pools()
 for r in generate_records(pools, GenConfig(seed=0, n_records=5)):
     spans = ", ".join(f"{e.type}/{e.polarity}:{e.text!r}" for e in r.entities) or "(none)"
     print(r.text[:90], "=>", spans)
@@ -187,7 +198,7 @@ flags (added to `scripts.train`):
 **Recommended for a 6 GB GPU** — deberta-v3-xsmall fits comfortably:
 
 ```bash
-python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 25000 --seed 42
+python -m scripts.generate_data --out data/train.jsonl --n 25000 --seed 42
 python -m scripts.train \
     --train-jsonl data/train.jsonl --output-dir artifacts/ckpt \
     --base-model microsoft/deberta-v3-xsmall \
@@ -211,7 +222,7 @@ Feasible with `deberta-v3-xsmall` if you keep the job small. CPU specifics:
 - Prefer the machine with more RAM (xsmall itself needs < 4 GB).
 
 ```bash
-python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train_cpu.jsonl --n 8000 --seed 42
+python -m scripts.generate_data --out data/train_cpu.jsonl --n 8000 --seed 42
 
 OMP_NUM_THREADS=$(nproc) python -m scripts.train \
     --train-jsonl data/train_cpu.jsonl --output-dir artifacts/ckpt \
@@ -226,16 +237,16 @@ is the better use of time.
 
 ---
 
-## 6. Postgres warehouse (optional, needs Docker + `.[data]`)
+## 6. Postgres warehouse — gold store & versioning (`.[data]`)
 
-For the production gold store / annotation / versioning trail
-(`docs/data_specification.md` §20):
+Beyond the pools (§3), the same DB holds the production gold store / annotation
+/ versioning trail (`docs/data_specification.md` §20). Useful init variants:
 
 ```bash
 docker compose up -d                                   # Postgres on localhost:6655
 
-python -m scripts.init_postgres                        # schema + example seed
-python -m scripts.init_postgres --seed sql/postgres/seed.sql   # load the full seed
+python -m scripts.init_postgres                        # schema + tiny example seed
+python -m scripts.init_postgres --seed sql/postgres/seed.sql   # schema + full seed
 python -m scripts.init_postgres --no-seed              # schema only
 python -m scripts.init_postgres --verify               # row counts + v_split_coverage
 ```
@@ -287,4 +298,5 @@ ruff check .
 | `psycopg is not installed` | `pip install -e .[data]` |
 | `scripts.build_seed` says "seed validation failed" | a template references a `{decoy:slot}` with no pool — add the slot in `scripts/seedgen/decoys.py` (must be in `ALLOWED_DECOY_SLOTS`) |
 | Postgres connection refused | `docker compose up -d` and wait for the healthcheck (`docker compose ps`) |
-| Want a fresh pool DB | delete `data/pools.sqlite` and re-run the `--init-db` step (it is git-ignored) |
+| Want fresh pools | re-run `python -m scripts.init_postgres --seed sql/postgres/seed.sql` (idempotent), or `docker compose down -v` to wipe the volume entirely |
+| `KeyError`/empty pool in `generate_data` | Postgres isn't seeded — run the §3 `init_postgres --seed` step first |

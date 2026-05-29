@@ -1,16 +1,16 @@
-"""Entity / decoy / template pools loaded from SQLite (or in-memory seeds).
+"""Entity / decoy / template pools loaded from Postgres (or in-memory seeds).
 
-The pipeline is decoupled from the source of pools: load_from_sqlite() reads
-seed SQL conforming to sql/schema.sql, and `Pools` is also constructable
-directly from Python dicts for tests and offline development.
+The pipeline is decoupled from the source of pools: load_from_postgres() reads
+the entity/decoy/template tables from the Postgres warehouse (matching
+sql/postgres/schema.sql), and `Pools` is also constructable directly from
+Python dicts for tests and offline development.
 """
 from __future__ import annotations
 
 import json
-import sqlite3
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from ner.constants import ENTITY_TYPES
 
@@ -60,65 +60,19 @@ class Pools:
             raise ValueError("No templates loaded")
 
 
-SCHEMA_FILE: Path = Path(__file__).resolve().parents[2] / "sql" / "schema.sql"
+DEFAULT_DSN: str = "postgresql://ner:ner@localhost:6655/multi_entity_ner"
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    schema_sql = SCHEMA_FILE.read_text()
-    conn.executescript(schema_sql)
-
-
-def load_from_sqlite(path: str | Path) -> Pools:
-    """Load pools from a SQLite database matching sql/schema.sql."""
-    pools = Pools()
-    with sqlite3.connect(str(path)) as conn:
-        _ensure_schema(conn)
-        cur = conn.execute(
-            "SELECT entity_type, value, weight FROM entity_pools"
-        )
-        for et, value, weight in cur:
-            pools.add_entity(et, value, weight)
-
-        cur = conn.execute(
-            "SELECT slot_name, value, weight FROM decoy_pools"
-        )
-        for slot, value, weight in cur:
-            pools.add_decoy(slot, value, weight)
-
-        cur = conn.execute("SELECT template, weight FROM templates")
-        for tmpl, weight in cur:
-            pools.add_template(tmpl, weight)
-    return pools
-
-
-def build_sqlite_from_sql_files(
-    target_path: str | Path,
-    seed_sql_files: Iterable[str | Path],
-) -> Path:
-    """Initialize a SQLite DB with our schema and apply seed SQL files in order."""
-    target = Path(target_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target.unlink()
-    with sqlite3.connect(str(target)) as conn:
-        _ensure_schema(conn)
-        for sql_path in seed_sql_files:
-            conn.executescript(Path(sql_path).read_text())
-    return target
-
-
-DEFAULT_POSTGRES_DSN: str = "postgresql://ner:ner@localhost:6655/multi_entity_ner"
+def resolve_dsn(dsn: str | None = None) -> str:
+    """Resolve the Postgres DSN: explicit arg > $DATABASE_URL > DEFAULT_DSN."""
+    return dsn or os.environ.get("DATABASE_URL") or DEFAULT_DSN
 
 
 def load_from_postgres(dsn: str | None = None) -> Pools:
-    """Load pools from a Postgres DB matching sql/postgres/schema.sql.
+    """Load pools from the Postgres warehouse (matching sql/postgres/schema.sql).
 
-    The table names and columns match the SQLite contract, so this is a
-    drop-in alternative for `load_from_sqlite` once the production DB is
-    populated (see scripts.init_postgres).
-
-    psycopg is imported lazily so this module remains importable without
-    the [data] extra.
+    `dsn=None` resolves to $DATABASE_URL then DEFAULT_DSN. psycopg is imported
+    lazily so this module stays importable without the [data] extra.
     """
     try:
         import psycopg
@@ -129,7 +83,7 @@ def load_from_postgres(dsn: str | None = None) -> Pools:
         ) from exc
 
     pools = Pools()
-    with psycopg.connect(dsn or DEFAULT_POSTGRES_DSN) as conn, conn.cursor() as cur:
+    with psycopg.connect(resolve_dsn(dsn)) as conn, conn.cursor() as cur:
         cur.execute("SELECT entity_type, value, weight FROM entity_pools")
         for et, value, weight in cur.fetchall():
             pools.add_entity(et, value, float(weight))

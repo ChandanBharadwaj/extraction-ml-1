@@ -28,11 +28,11 @@ import os
 import sys
 from pathlib import Path
 
+from ner.data.pools import DEFAULT_DSN
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA = REPO_ROOT / "sql" / "postgres" / "schema.sql"
 DEFAULT_SEED = REPO_ROOT / "sql" / "postgres" / "example_seed.sql"
-
-DEFAULT_DSN = "postgresql://ner:ner@localhost:6655/multi_entity_ner"
 
 
 def _connect(dsn: str):
@@ -48,7 +48,7 @@ def _connect(dsn: str):
 
 
 def apply_schema(dsn: str, schema_path: Path) -> None:
-    sql = schema_path.read_text()
+    sql = schema_path.read_text(encoding="utf-8")
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(sql)
         conn.commit()
@@ -58,7 +58,7 @@ def apply_schema(dsn: str, schema_path: Path) -> None:
 def load_seed(dsn: str, seed_path: Path) -> dict[str, int]:
     """Apply a seed SQL file. Returns row counts of the three pool tables
     after load so the operator sees what landed."""
-    sql = seed_path.read_text()
+    sql = seed_path.read_text(encoding="utf-8")
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(sql)
         counts: dict[str, int] = {}

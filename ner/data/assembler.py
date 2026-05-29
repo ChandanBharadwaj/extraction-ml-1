@@ -1,4 +1,4 @@
-"""Top-level data pipeline: SQL -> Pools -> slot-fill -> noise -> preprocess -> JSONL.
+"""Top-level data pipeline: Postgres -> Pools -> slot-fill -> noise -> preprocess -> JSONL.
 
 Preprocessing runs *after* noise injection so the model trains on the same
 cleaned-text distribution it will see at inference. The `PreprocessConfig`
@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ner.data.noise import NoiseConfig, apply_noise
-from ner.data.pools import Pools, load_from_sqlite
+from ner.data.pools import Pools, load_from_postgres
 from ner.data.slot_fill import GenConfig, generate_records
 from ner.preprocess import PreprocessConfig, Preprocessor
 from ner.schema import Record
@@ -70,15 +70,18 @@ def read_jsonl(path: str | Path) -> list[Record]:
     return out
 
 
-def assemble_from_sqlite(
-    sqlite_path: str | Path,
+def assemble_from_postgres(
+    dsn: str | None,
     out_path: str | Path,
     config: AssemblerConfig,
 ) -> Path:
     """Assemble synthetic data to JSONL and write `preprocess.json` next to it
     so downstream training and serving can adopt the same cleaning config.
+
+    Pools are read from the Postgres warehouse; `dsn=None` resolves to
+    $DATABASE_URL then the default local DSN (see `ner.data.pools.resolve_dsn`).
     """
-    pools = load_from_sqlite(sqlite_path)
+    pools = load_from_postgres(dsn)
     records = assemble(pools, config)
     out = write_jsonl(records, out_path)
     if config.apply_preprocess:

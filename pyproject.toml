@@ -21,6 +21,7 @@ train = [
     "datasets>=2.20",
     "accelerate>=0.33",
     "seqeval>=1.2.2",
+    "sentencepiece>=0.2",
     "onnx>=1.16",
     "onnxruntime>=1.18",
 ]

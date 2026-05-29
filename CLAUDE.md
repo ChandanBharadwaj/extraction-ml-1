@@ -18,7 +18,7 @@ Install (optional-deps groups defined in `pyproject.toml`):
 pip install -e .[dev]            # tests + ruff
 pip install -e .[train]          # adds torch / transformers / datasets / seqeval / onnx
 pip install -e .[inference]      # serving only (numpy + onnxruntime + tokenizers)
-pip install -e .[data]           # adds anthropic SDK for the LLM data-gen hook
+pip install -e .[data]           # adds psycopg (Postgres pools) + anthropic SDK
 ```
 
 Tests:
@@ -29,29 +29,30 @@ pytest tests/test_bio.py -v           # one file
 pytest -k threshold                   # by name substring
 ```
 
-Production data warehouse (Postgres in Docker on `:6655`):
+Data warehouse — Postgres in Docker on `:6655` is the **single source** for
+pools and gold (there is no SQLite path):
 
 ```bash
 docker compose up -d                          # start the DB (multi_entity_ner @ localhost:6655)
-python -m scripts.init_postgres               # apply schema + load example seed
+python -m scripts.init_postgres --seed sql/postgres/seed.sql   # schema + full production seed
 python -m scripts.init_postgres --verify      # show row counts + v_split_coverage
 ```
 
-The schema (`sql/postgres/schema.sql`) covers synthetic pools, the gold
-store, and the annotation / adjudication / versioning trail. See
-`docs/data_specification.md` §20 for the full contract. The SQLite path
-(`sql/schema.sql`, `data/pools.sqlite`) stays available for offline tests.
+`scripts.init_postgres` with no `--seed` loads the tiny `sql/postgres/example_seed.sql`.
+The schema (`sql/postgres/schema.sql`) covers synthetic pools, the gold store,
+and the annotation / adjudication / versioning trail. See
+`docs/data_specification.md` §20 for the full contract.
 
 Pipeline CLIs (all installed as `python -m scripts.<name>`):
 
 ```bash
-# 1) Initialize a SQLite pool DB from sql/schema.sql + a seed .sql.
-#    sql/example_seed.sql is the tiny smoke seed; sql/seed.sql is the full
-#    production seed covering every docs/data_specification.md scenario.
-python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
+# 1) (one-time) seed the Postgres pools — see the docker compose + init_postgres
+#    block above. The full production seed is sql/postgres/seed.sql (regenerate
+#    from scripts/seedgen/ with `python -m scripts.build_seed`).
 
-# 2) Generate synthetic training JSONL from the pool DB.
-python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
+# 2) Generate synthetic training JSONL from the Postgres pools.
+#    Connection: --postgres-dsn, else $DATABASE_URL, else the default local DSN.
+python -m scripts.generate_data --out data/train.jsonl --n 50000
 
 # 3) Fine-tune DeBERTa-v3 on the JSONL; early-stop on real gold.
 python -m scripts.train --train-jsonl data/train.jsonl --output-dir artifacts/ckpt
@@ -72,7 +73,7 @@ python -m scripts.infer --artifact-dir artifacts/serve --text "manifest contains
 Data flows through four stages that talk only through files:
 
 ```
-SQLite pool DB  --(slot_fill + noise + preprocess)-->  train.jsonl
+Postgres pools  --(slot_fill + noise + preprocess)-->  train.jsonl
                                               \---->  preprocess.json
                                               |
                                               v
@@ -138,7 +139,7 @@ These cross-cut multiple files; touching them requires changing all consumers.
 
 ## Slot-fill template grammar
 
-Templates live in the `templates` table of the SQLite pool DB and use:
+Templates live in the `templates` table of the Postgres pool DB and use:
 
 - `{PERSON}` `{ORG}` `{ADDRESS}` `{COMMODITY}` — entity slots (label-bearing).
 - `{NEG_COMMODITY}` — samples from the COMMODITY pool, emits `polarity=NEG`.
@@ -170,7 +171,7 @@ satisfies the floor (non-zero exit with diagnostics).
 
 - Changing what entities exist or how they're labeled → `ner/constants.py` + `ner/schema.py` (then run the full test suite to surface every consumer).
 - Adding a new noise transformation → `ner/data/noise.py` (honor `preserve_spans` and entity-surface guards; reproject offsets via `_apply_to_record`).
-- Adding new template patterns or pools → edit the source-of-truth Python modules in `scripts/seedgen/` (one per scenario family: `persons.py`, `orgs.py`, `addresses.py`, `commodities.py`, `decoys.py`, `templates.py`), then regenerate the SQL with `python -m scripts.build_seed`. The builder dedups, validates that every `{decoy:slot}` a template references has a backing pool, and emits both `sql/seed.sql` (SQLite) and `sql/postgres/seed.sql` (Postgres). `tests/test_seed_full.py` keeps the committed SQL in sync. The tiny `sql/example_seed.sql` is the smoke seed used by `tests/test_pools_sqlite.py`; leave it alone unless you mean to touch that test.
+- Adding new template patterns or pools → edit the source-of-truth Python modules in `scripts/seedgen/` (one per scenario family: `persons.py`, `orgs.py`, `addresses.py`, `commodities.py`, `decoys.py`, `templates.py`), then regenerate the seed with `python -m scripts.build_seed` (emits `sql/postgres/seed.sql`) and reload it via `python -m scripts.init_postgres --seed sql/postgres/seed.sql`. The builder dedups, validates that every `{decoy:slot}` a template references has a backing pool, and `tests/test_seed_full.py` keeps the committed SQL in sync (and builds `Pools` directly from the modules via `build_seed.build_pools()` — no DB needed for tests). The tiny `sql/postgres/example_seed.sql` is the smoke seed loaded by default.
 - Tuning the serving operating point → `ner/eval/threshold_sweep.py` + `scripts/tune_threshold.py`.
 - Adding / changing a preprocessing step → `ner/preprocess.py` (must update the position map; train and inference will both adopt it via `preprocess.json`).
 - LLM data generation (Anthropic SDK with prompt caching, optional) → `ner/llm/claude_generator.py`.

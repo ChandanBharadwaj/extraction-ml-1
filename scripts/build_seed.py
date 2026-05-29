@@ -1,19 +1,17 @@
 """Build the production seed SQL from the `scripts.seedgen` data modules.
 
-Emits two files from the same source-of-truth Python lists:
-  - sql/seed.sql           (SQLite dialect: INSERT OR IGNORE)
+Emits the Postgres seed from the source-of-truth Python lists:
   - sql/postgres/seed.sql  (Postgres dialect: ON CONFLICT DO NOTHING)
 
 Run:
-    python -m scripts.build_seed                 # write both files
+    python -m scripts.build_seed                 # write the file
     python -m scripts.build_seed --check         # validate only, no write
 
 The seedgen modules hold *plain* surface strings (no SQL escaping). This
 builder deduplicates (order-preserving), validates that every {decoy:<slot>}
 referenced by a template has a backing pool and that the entity/decoy pools
-are non-empty, then escapes and emits the SQL. Keeping the data in Python and
-escaping in one place avoids hand-escaping bugs across thousands of values
-(apostrophes, newlines, non-ASCII).
+are non-empty, then escapes and emits the SQL. `build_pools()` returns the same
+data as an in-memory `Pools` object (no DB round-trip) for tests / offline use.
 """
 from __future__ import annotations
 
@@ -22,6 +20,7 @@ import re
 from pathlib import Path
 
 from ner.constants import ENTITY_TYPES
+from ner.data.pools import Pools
 from scripts.seedgen import ALLOWED_DECOY_SLOTS
 from scripts.seedgen.addresses import ADDRESSES
 from scripts.seedgen.commodities import COMMODITIES
@@ -31,7 +30,6 @@ from scripts.seedgen.persons import PERSONS
 from scripts.seedgen.templates import TEMPLATES
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SQLITE_OUT = REPO_ROOT / "sql" / "seed.sql"
 POSTGRES_OUT = REPO_ROOT / "sql" / "postgres" / "seed.sql"
 
 # Mirror of ner.data.slot_fill._SLOT_RE so we can validate templates without
@@ -53,13 +51,12 @@ def _dedup(values: list[str]) -> list[str]:
 
 
 def _entity_pools() -> dict[str, list[str]]:
-    pools = {
+    return {
         "PERSON": _dedup(PERSONS),
         "ORG": _dedup(ORGS),
         "ADDRESS": _dedup(ADDRESSES),
         "COMMODITY": _dedup(COMMODITIES),
     }
-    return pools
 
 
 def _decoy_pools() -> dict[str, list[str]]:
@@ -80,12 +77,10 @@ def validate() -> dict[str, object]:
     templates = _templates()
     errors: list[str] = []
 
-    # Entity pools: all four types present and non-empty.
     for et in ENTITY_TYPES:
         if not entity_pools.get(et):
             errors.append(f"entity pool {et!r} is empty")
 
-    # Decoy pools: every declared slot present and non-empty.
     for slot in ALLOWED_DECOY_SLOTS:
         if not decoy_pools.get(slot):
             errors.append(f"decoy pool {slot!r} is missing or empty")
@@ -96,7 +91,6 @@ def validate() -> dict[str, object]:
     if not templates:
         errors.append("no templates")
 
-    # Templates: every slot must resolve to a real pool.
     valid_entity_kinds = set(ENTITY_TYPES) | {f"NEG_{et}" for et in ENTITY_TYPES}
     for tmpl in templates:
         for m in _SLOT_RE.finditer(tmpl):
@@ -121,6 +115,25 @@ def validate() -> dict[str, object]:
     }
 
 
+def build_pools() -> Pools:
+    """Return the seed as an in-memory `Pools` object (no DB round-trip).
+
+    Validates first, so a returned `Pools` is always slot-fill-ready.
+    """
+    validate()
+    pools = Pools()
+    entity_pools = _entity_pools()
+    for et in ENTITY_TYPES:
+        for v in entity_pools[et]:
+            pools.add_entity(et, v)
+    for slot, vals in _decoy_pools().items():
+        for v in vals:
+            pools.add_decoy(slot, v)
+    for tmpl in _templates():
+        pools.add_template(tmpl)
+    return pools
+
+
 def _sql_str(value: str) -> str:
     """Single-quote a SQL string literal, escaping embedded quotes."""
     return "'" + value.replace("'", "''") + "'"
@@ -136,20 +149,15 @@ def _emit_inserts(
     columns: tuple[str, ...],
     rows: list[tuple[str, ...]],
     *,
-    dialect: str,
     conflict_cols: tuple[str, ...],
 ) -> list[str]:
-    """Emit one or more multi-row INSERT statements for a table."""
+    """Emit one or more multi-row Postgres INSERT ... ON CONFLICT statements."""
     if not rows:
         return []
     out: list[str] = []
     col_sql = ", ".join(columns)
-    if dialect == "sqlite":
-        prefix = f"INSERT OR IGNORE INTO {table} ({col_sql}) VALUES"
-        suffix = ";"
-    else:  # postgres
-        prefix = f"INSERT INTO {table} ({col_sql}) VALUES"
-        suffix = f"\nON CONFLICT ({', '.join(conflict_cols)}) DO NOTHING;"
+    prefix = f"INSERT INTO {table} ({col_sql}) VALUES"
+    suffix = f"\nON CONFLICT ({', '.join(conflict_cols)}) DO NOTHING;"
     for chunk in _chunked(rows, _ROWS_PER_STATEMENT):
         value_rows = ",\n".join(
             "    (" + ", ".join(_sql_str(c) for c in row) + ")" for row in chunk
@@ -158,7 +166,8 @@ def _emit_inserts(
     return out
 
 
-def _build_sql(dialect: str) -> str:
+def build_sql() -> str:
+    """Render the Postgres seed SQL text."""
     entity_pools = _entity_pools()
     decoy_pools = _decoy_pools()
     templates = _templates()
@@ -175,7 +184,6 @@ def _build_sql(dialect: str) -> str:
 
     parts: list[str] = [header]
 
-    # entity_pools
     entity_rows: list[tuple[str, str]] = []
     for et in ENTITY_TYPES:
         for v in entity_pools[et]:
@@ -184,11 +192,10 @@ def _build_sql(dialect: str) -> str:
     parts.extend(
         _emit_inserts(
             "entity_pools", ("entity_type", "value"), entity_rows,
-            dialect=dialect, conflict_cols=("entity_type", "value"),
+            conflict_cols=("entity_type", "value"),
         )
     )
 
-    # decoy_pools
     decoy_rows: list[tuple[str, str]] = []
     for slot in ALLOWED_DECOY_SLOTS:
         for v in decoy_pools[slot]:
@@ -197,17 +204,16 @@ def _build_sql(dialect: str) -> str:
     parts.extend(
         _emit_inserts(
             "decoy_pools", ("slot_name", "value"), decoy_rows,
-            dialect=dialect, conflict_cols=("slot_name", "value"),
+            conflict_cols=("slot_name", "value"),
         )
     )
 
-    # templates
     template_rows = [(t,) for t in templates]
     parts.append("\n-- ===== templates =====")
     parts.extend(
         _emit_inserts(
             "templates", ("template",), template_rows,
-            dialect=dialect, conflict_cols=("template",),
+            conflict_cols=("template",),
         )
     )
 
@@ -217,13 +223,12 @@ def _build_sql(dialect: str) -> str:
 def build(write: bool = True) -> dict[str, object]:
     summary = validate()
     if write:
-        SQLITE_OUT.write_text(_build_sql("sqlite"), encoding="utf-8")
-        POSTGRES_OUT.write_text(_build_sql("postgres"), encoding="utf-8")
+        POSTGRES_OUT.write_text(build_sql(), encoding="utf-8")
     return summary
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build production seed SQL from seedgen modules")
+    ap = argparse.ArgumentParser(description="Build the Postgres seed SQL from seedgen modules")
     ap.add_argument("--check", action="store_true", help="validate only; do not write files")
     args = ap.parse_args()
 
@@ -239,7 +244,6 @@ def main() -> None:
     if args.check:
         print("(--check: no files written)")
     else:
-        print(f"  wrote {SQLITE_OUT.relative_to(REPO_ROOT)}")
         print(f"  wrote {POSTGRES_OUT.relative_to(REPO_ROOT)}")
 
 

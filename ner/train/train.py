@@ -117,7 +117,7 @@ def train(config: TrainConfig) -> Path:
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
         warmup_ratio=config.warmup_ratio,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=2,
         load_best_model_at_end=True,
@@ -135,7 +135,7 @@ def train(config: TrainConfig) -> Path:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=DataCollatorForTokenClassification(tokenizer),
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         compute_metrics=SpanF1Metric(tokenizer, gold_records, preprocessor),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=config.early_stopping_patience)],
     )

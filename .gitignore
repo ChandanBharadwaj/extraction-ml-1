@@ -15,9 +15,7 @@ venv/
 /data/
 /artifacts/
 *.onnx
-*.sqlite
 *.jsonl
-!sql/example_seed.sql
 
 # Editor
 .vscode/
