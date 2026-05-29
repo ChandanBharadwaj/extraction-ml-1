@@ -119,6 +119,13 @@ PY
 
 ## 5. Train → export → tune → serve
 
+> **No local GPU?** Use the free Colab notebook at `notebooks/colab_train.ipynb`
+> (T4 GPU; a deberta-v3-xsmall run is ~10–15 min). Open it via
+> `https://colab.research.google.com/github/ChandanBharadwaj/extraction-ml-1/blob/<branch>/notebooks/colab_train.ipynb`
+> or upload it to [colab.research.google.com](https://colab.research.google.com).
+> Set `Runtime → Change runtime type → T4 GPU`, then run the cells top to bottom;
+> the last cell saves artifacts to Google Drive (Colab disks are ephemeral).
+
 These need the heavier extras (`.[train]` then `.[inference]`).
 
 ```bash
