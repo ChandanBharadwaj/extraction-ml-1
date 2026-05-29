@@ -31,10 +31,15 @@ class TrainConfig:
     epochs: int = 3
     per_device_train_batch_size: int = 32
     per_device_eval_batch_size: int = 32
+    gradient_accumulation_steps: int = 1
     learning_rate: float = 3e-5
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
     max_seq_len: int = MAX_SEQ_LEN
+    # Cap synthetic training records (None = use all). Handy for smoke runs.
+    max_train_samples: int | None = None
+    # fp16 mixed precision — halves memory so base models fit small GPUs.
+    fp16: bool = False
     seed: int = 42
     early_stopping_patience: int = 2
 
@@ -67,6 +72,8 @@ def train(config: TrainConfig) -> Path:
     )
 
     train_records = read_jsonl(config.train_jsonl)
+    if config.max_train_samples is not None:
+        train_records = train_records[: config.max_train_samples]
     gold_records = load_gold(config.gold_jsonl)
 
     # Resolve the preprocess config: explicit arg > sibling of train_jsonl >
@@ -106,6 +113,7 @@ def train(config: TrainConfig) -> Path:
         num_train_epochs=config.epochs,
         per_device_train_batch_size=config.per_device_train_batch_size,
         per_device_eval_batch_size=config.per_device_eval_batch_size,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
         warmup_ratio=config.warmup_ratio,
@@ -118,7 +126,7 @@ def train(config: TrainConfig) -> Path:
         seed=config.seed,
         report_to=[],
         bf16=False,
-        fp16=False,
+        fp16=config.fp16,
     )
 
     trainer = Trainer(

@@ -144,6 +144,55 @@ runtime = from_artifact_dir("artifacts/serve")
 print(runtime.predict("Maria Gonzalez from Acme Trading Co. confirmed refined copper cathode"))
 ```
 
+### Choosing a smaller / faster model
+
+The default `microsoft/deberta-v3-base` is ~184M params → **~700 MB** on disk
+(most of it the 128K-token embedding) and needs a real GPU. Swap the backbone
+with `--base-model` — no other change; the BIO head and `LABEL_LIST` contract
+are backbone-agnostic. FP32 size ≈ params × 4 bytes:
+
+| `--base-model` | Params | ~Size | Notes |
+|---|---|---|---|
+| `microsoft/deberta-v3-base` (default) | 184M | ~700 MB | best quality; GPU-only |
+| `microsoft/deberta-v3-xsmall` | ~71M | **~280 MB** | best size/quality tradeoff; fits 6 GB easily |
+| `distilbert-base-uncased` | ~66M | ~265 MB | fast English NER workhorse |
+| `microsoft/MiniLM-L12-H384-uncased` | ~33M | ~133 MB | smallest practical English option |
+| `distilbert-base-multilingual-cased` | ~135M | ~540 MB | if non-Latin names matter |
+
+DeBERTa-v3's small variants don't shrink much because the embedding is shared;
+to go below ~280 MB use a small-vocab (BERT/DistilBERT/MiniLM) model.
+
+### Training on a small GPU (e.g. GTX 1660 Ti, 6 GB)
+
+The `Trainer` auto-uses CUDA when available — confirm with
+`python -c "import torch; print(torch.cuda.is_available())"` (must be `True`;
+install the CUDA build of torch). Fit the job into limited VRAM with these
+flags (added to `scripts.train`):
+
+| Flag | Purpose |
+|---|---|
+| `--batch-size` | per-device batch; **lower** to fit VRAM |
+| `--grad-accum` | accumulate steps so *effective* batch = batch-size × grad-accum |
+| `--fp16` | mixed precision; ~halves memory (needed to fit base models on ≤6 GB) |
+| `--max-seq-len` | shorter sequences (128/192) save memory + time; data is ≤500 chars |
+| `--max-train-samples` | cap records for a quick smoke run |
+
+**Recommended for a 6 GB GPU** — deberta-v3-xsmall fits comfortably:
+
+```bash
+python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 25000 --seed 42
+python -m scripts.train \
+    --train-jsonl data/train.jsonl --output-dir artifacts/ckpt \
+    --base-model microsoft/deberta-v3-xsmall \
+    --batch-size 16 --max-seq-len 192 --epochs 3
+```
+
+If you insist on `deberta-v3-base` on 6 GB, you must shrink the footprint:
+`--batch-size 8 --grad-accum 4 --fp16 --max-seq-len 192` (drop to
+`--batch-size 4` if you still hit CUDA OOM). On GTX 16-series, if loss becomes
+`nan` under `--fp16`, drop `--fp16` and use `--batch-size 4` (no Tensor Cores,
+so fp16's benefit here is memory, not speed).
+
 ---
 
 ## 6. Postgres warehouse (optional, needs Docker + `.[data]`)
