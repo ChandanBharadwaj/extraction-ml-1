@@ -193,6 +193,30 @@ If you insist on `deberta-v3-base` on 6 GB, you must shrink the footprint:
 `nan` under `--fp16`, drop `--fp16` and use `--batch-size 4` (no Tensor Cores,
 so fp16's benefit here is memory, not speed).
 
+### Training on CPU (no GPU)
+
+Feasible with `deberta-v3-xsmall` if you keep the job small. CPU specifics:
+
+- **Do not pass `--fp16`** — CPUs don't accelerate fp16 (often slower). Keep fp32.
+- The biggest lever is `--max-seq-len` (cost scales with sequence length, and
+  the data is short) followed by fewer records / epochs.
+- Set `OMP_NUM_THREADS` to your physical core count to use all cores.
+- Prefer the machine with more RAM (xsmall itself needs < 4 GB).
+
+```bash
+python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train_cpu.jsonl --n 8000 --seed 42
+
+OMP_NUM_THREADS=$(nproc) python -m scripts.train \
+    --train-jsonl data/train_cpu.jsonl --output-dir artifacts/ckpt \
+    --base-model microsoft/deberta-v3-xsmall \
+    --batch-size 16 --max-seq-len 128 --epochs 2
+```
+
+Rough, hardware-dependent CPU timings with xsmall: ~8k records / 2 epochs /
+seq-128 ≈ 30–70 min (good first run); ~20k / 3 epochs ≈ 3–6 h. Full 50k on CPU
+is possible but slow (~10–20 h) — at that point a free cloud GPU (Colab/Kaggle)
+is the better use of time.
+
 ---
 
 ## 6. Postgres warehouse (optional, needs Docker + `.[data]`)
