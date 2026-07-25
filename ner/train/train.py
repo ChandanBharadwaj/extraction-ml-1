@@ -37,6 +37,10 @@ class TrainConfig:
     max_seq_len: int = MAX_SEQ_LEN
     seed: int = 42
     early_stopping_patience: int = 2
+    # Deterministic gold split for early stopping ("all" | "earlystop" |
+    # "tune"). Use "earlystop" here and tune thresholds with --eval-split
+    # tune so the two consumers don't share records (ner.eval.gold.split_gold).
+    gold_split: str = "all"
 
 
 def train(config: TrainConfig) -> Path:
@@ -53,7 +57,7 @@ def train(config: TrainConfig) -> Path:
     )
 
     from ner.data.assembler import read_jsonl
-    from ner.eval.gold import load_gold
+    from ner.eval.gold import load_gold, split_gold
     from ner.preprocess import Preprocessor
     from ner.train.dataset import encode_records
     from ner.train.metrics import SpanF1Metric
@@ -67,7 +71,7 @@ def train(config: TrainConfig) -> Path:
     )
 
     train_records = read_jsonl(config.train_jsonl)
-    gold_records = load_gold(config.gold_jsonl)
+    gold_records = split_gold(load_gold(config.gold_jsonl), config.gold_split)
 
     # Resolve the preprocess config: explicit arg > sibling of train_jsonl >
     # default. The same config is later saved into the model output dir so

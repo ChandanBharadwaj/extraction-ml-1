@@ -218,3 +218,27 @@ def load_gold(path: str | None = None) -> list[Record]:
         return list(GOLD_SEED)
     from ner.data.assembler import read_jsonl
     return read_jsonl(path)
+
+
+GOLD_SPLITS: tuple[str, ...] = ("all", "earlystop", "tune")
+
+
+def split_gold(records: list[Record], split: str) -> list[Record]:
+    """Deterministically partition gold so early stopping ("earlystop") and
+    threshold tuning ("tune") don't consume identical records.
+
+    Assignment hashes the record text (sha1 % 2), so it is stable across
+    runs, record ordering, and gold-set growth — adding records never moves
+    existing ones between halves. "all" returns everything unchanged.
+    """
+    if split == "all":
+        return list(records)
+    if split not in GOLD_SPLITS:
+        raise ValueError(f"unknown gold split {split!r}; expected one of {GOLD_SPLITS}")
+    import hashlib
+
+    want = 0 if split == "earlystop" else 1
+    return [
+        r for r in records
+        if int(hashlib.sha1(r.text.encode("utf-8")).hexdigest(), 16) % 2 == want
+    ]

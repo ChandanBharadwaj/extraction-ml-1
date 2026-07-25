@@ -19,6 +19,11 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=3e-5)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--gold-split", default="all",
+                   choices=("all", "earlystop", "tune"),
+                   help="Deterministic gold split for early stopping; pair "
+                        "with `tune_threshold --eval-split tune` so the two "
+                        "consumers don't share records (default: all)")
     args = p.parse_args()
 
     cfg = TrainConfig(
@@ -31,6 +36,7 @@ def main() -> None:
         per_device_eval_batch_size=args.batch_size,
         learning_rate=args.lr,
         seed=args.seed,
+        gold_split=args.gold_split,
     )
     out = train(cfg)
     print(f"Saved model to {out}")
