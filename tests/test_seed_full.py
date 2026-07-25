@@ -37,8 +37,26 @@ def test_seed_validation_passes():
     assert ep["PERSON"] >= 300
     assert ep["ORG"] >= 300
     assert ep["ADDRESS"] >= 150
-    assert ep["COMMODITY"] >= 250
+    assert ep["COMMODITY"] >= 600
     assert summary["templates"] >= 100
+
+
+def test_commodity_pool_cargo_coverage():
+    """The cargo/trade forms that dominate real manifests must stay covered."""
+    from ner.data.slot_fill import build_family_index
+    from scripts.seedgen.commodities import COMMODITIES
+
+    values = build_seed._dedup(COMMODITIES)
+    # XXL trade specifications (long B/L description lines).
+    assert sum(1 for v in values if len(v) > 120) >= 5
+    # HS-heading / telex ALL-CAPS surfaces.
+    all_caps = [v for v in values if v.isupper() and any(c.isalpha() for c in v)]
+    assert len(all_caps) >= 40
+    # Generic-cargo declarations.
+    for needed in ("general cargo", "personal effects", "used machinery", "spare parts"):
+        assert needed in values
+    # Head-noun families backing the ~pair slot grammar.
+    assert len(build_family_index(values)) >= 90
 
 
 def test_emitted_sql_loads_and_generates(tmp_path):
