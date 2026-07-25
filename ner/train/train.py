@@ -41,6 +41,28 @@ class TrainConfig:
     # "tune"). Use "earlystop" here and tune thresholds with --eval-split
     # tune so the two consumers don't share records (ner.eval.gold.split_gold).
     gold_split: str = "all"
+    # Checkpoint-selection metric. "f1" is micro span-F1; SpanF1Metric also
+    # emits per-bucket keys like "f1_COMMODITY(NEG)" for cargo-focused runs.
+    metric_for_best_model: str = "f1"
+    # "none" | "neg_boost": weight the rare B-/I-NEG_COMMODITY labels in the
+    # cross-entropy loss. Data-side rebalancing is the primary lever; this is
+    # an opt-in knob, not a default.
+    class_weights: str = "none"
+
+
+NEG_BOOST_WEIGHT: float = 3.0
+
+
+def class_weight_values(scheme: str) -> list[float] | None:
+    """Per-label loss weights for a scheme; None means unweighted."""
+    if scheme == "none":
+        return None
+    if scheme == "neg_boost":
+        weights = [1.0] * NUM_LABELS
+        for label in ("B-NEG_COMMODITY", "I-NEG_COMMODITY"):
+            weights[LABEL2ID[label]] = NEG_BOOST_WEIGHT
+        return weights
+    raise ValueError(f"unknown class_weights scheme {scheme!r}")
 
 
 def train(config: TrainConfig) -> Path:
@@ -117,7 +139,7 @@ def train(config: TrainConfig) -> Path:
         save_strategy="epoch",
         save_total_limit=2,
         load_best_model_at_end=True,
-        metric_for_best_model="f1",
+        metric_for_best_model=config.metric_for_best_model,
         greater_is_better=True,
         seed=config.seed,
         report_to=[],
@@ -125,15 +147,51 @@ def train(config: TrainConfig) -> Path:
         fp16=False,
     )
 
-    trainer = Trainer(
+    weight_values = class_weight_values(config.class_weights)
+    trainer_cls = Trainer
+    trainer_extra: dict = {}
+    if weight_values is not None:
+        import torch
+
+        class WeightedLossTrainer(Trainer):
+            """Stock Trainer with per-label CrossEntropyLoss weights, so the
+            rare NEG_COMMODITY labels can be boosted without oversampling."""
+
+            def __init__(self, *t_args, class_weight_tensor=None, **t_kwargs):
+                super().__init__(*t_args, **t_kwargs)
+                self._class_weight_tensor = class_weight_tensor
+
+            def compute_loss(self, model, inputs, return_outputs=False, **_):
+                labels = inputs.pop("labels")
+                outputs = model(**inputs)
+                logits = outputs.logits
+                loss_fct = torch.nn.CrossEntropyLoss(
+                    weight=self._class_weight_tensor.to(logits.device),
+                    ignore_index=-100,
+                )
+                loss = loss_fct(
+                    logits.view(-1, logits.shape[-1]), labels.view(-1)
+                )
+                return (loss, outputs) if return_outputs else loss
+
+        trainer_cls = WeightedLossTrainer
+        trainer_extra["class_weight_tensor"] = torch.tensor(
+            weight_values, dtype=torch.float32
+        )
+
+    trainer = trainer_cls(
         model=model,
         args=args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=DataCollatorForTokenClassification(tokenizer),
         tokenizer=tokenizer,
-        compute_metrics=SpanF1Metric(tokenizer, gold_records, preprocessor),
+        compute_metrics=SpanF1Metric(
+            tokenizer, gold_records, preprocessor,
+            max_length=config.max_seq_len,
+        ),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=config.early_stopping_patience)],
+        **trainer_extra,
     )
 
     trainer.train()

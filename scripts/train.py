@@ -24,6 +24,13 @@ def main() -> None:
                    help="Deterministic gold split for early stopping; pair "
                         "with `tune_threshold --eval-split tune` so the two "
                         "consumers don't share records (default: all)")
+    p.add_argument("--class-weights", default="none",
+                   choices=("none", "neg_boost"),
+                   help="neg_boost weights B-/I-NEG_COMMODITY in the loss "
+                        "(default: none)")
+    p.add_argument("--metric-for-best-model", default="f1",
+                   help="Checkpoint-selection metric; per-bucket keys like "
+                        "'f1_COMMODITY(NEG)' are also emitted (default: f1)")
     args = p.parse_args()
 
     cfg = TrainConfig(
@@ -37,6 +44,8 @@ def main() -> None:
         learning_rate=args.lr,
         seed=args.seed,
         gold_split=args.gold_split,
+        class_weights=args.class_weights,
+        metric_for_best_model=args.metric_for_best_model,
     )
     out = train(cfg)
     print(f"Saved model to {out}")
