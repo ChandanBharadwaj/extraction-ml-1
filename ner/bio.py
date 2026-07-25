@@ -90,12 +90,22 @@ def char_spans_to_bio(
     return labels
 
 
+# Characters trimmed from decoded span edges. Tokenizer offset mappings can
+# absorb a leading metaspace blank or a trailing list comma into the span;
+# under the exact (type, polarity, start, end) match key that is a full miss,
+# not partial credit. Deliberately NOT trimmed: "." (ORG spans like "Acme
+# Trading Co."), "'" (names), "-" (hyphenated commodities), parentheses.
+_TRIM_LEADING = " \t\n,;:|—–·"
+_TRIM_TRAILING = " \t\n,;:|—–"
+
+
 def bio_ids_to_spans(
     label_ids: Sequence[int],
     offset_mapping: OffsetMapping,
     source_text: str,
     *,
     strict: bool = False,
+    trim: bool = True,
 ) -> list[Entity]:
     """Decode per-token label ids into character-level Entity spans.
 
@@ -106,6 +116,11 @@ def bio_ids_to_spans(
     NEG_COMMODITY-prefixed labels decode into Entity(polarity="NEG"). A
     polarity flip mid-span (B-COMMODITY followed by I-NEG_COMMODITY, or vice
     versa) closes the open span and opens a new one.
+
+    `trim=True` (default) strips whitespace and separator punctuation from
+    decoded span edges, readjusting offsets. Training metrics, threshold
+    sweeping, and serving all share this decoder, so the default applies
+    uniformly; the kwarg exists for test introspection only.
     """
     from ner.constants import ID2LABEL
 
@@ -118,11 +133,18 @@ def bio_ids_to_spans(
     def close() -> None:
         nonlocal open_type, open_polarity, open_char_start, open_char_end
         if open_type is not None and open_char_start is not None and open_char_end is not None:
-            text = source_text[open_char_start:open_char_end]
+            start, end = open_char_start, open_char_end
+            text = source_text[start:end]
+            if trim:
+                stripped = text.lstrip(_TRIM_LEADING)
+                start += len(text) - len(stripped)
+                stripped = stripped.rstrip(_TRIM_TRAILING)
+                end = start + len(stripped)
+                text = stripped
             if text:
                 spans.append(Entity(
                     type=open_type, text=text,
-                    start=open_char_start, end=open_char_end,
+                    start=start, end=end,
                     polarity=open_polarity,
                 ))
         open_type = None

@@ -30,7 +30,13 @@ NUM_LABELS: int = len(LABEL_LIST)
 
 BASE_MODEL: str = "microsoft/deberta-v3-base"
 
-MAX_INPUT_CHARS: int = 500
-MAX_SEQ_LEN: int = 256  # token budget; 500 chars comfortably fits
+# Hard cap on accepted input; the runtime warns when it truncates. Long
+# inputs are handled by sliding-window inference over MAX_SEQ_LEN-token
+# windows (see ner.infer.runtime), so this bounds cost, not model reach.
+MAX_INPUT_CHARS: int = 4000
+MAX_SEQ_LEN: int = 256  # per-window token budget (checkpoint-compatible)
+# Token overlap between adjacent inference windows; merged by taking each
+# token's logits from the window where it sits most interior.
+WINDOW_OVERLAP_TOKENS: int = 64
 
 LATENCY_SLA_MS: int = 1_000

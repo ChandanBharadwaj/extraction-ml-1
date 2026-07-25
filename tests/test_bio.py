@@ -186,3 +186,54 @@ def test_apply_threshold_gate_with_zero_thresholds_is_noop():
     out = apply_threshold_gate(probs, thresholds)
     expected = np.argmax(probs, axis=-1)
     assert np.array_equal(out, expected)
+
+
+def test_decoded_span_leading_space_is_trimmed():
+    """A tokenizer offset that absorbs the leading metaspace blank must not
+    produce a span starting one char early — that would be a full miss under
+    the exact-match key."""
+    text = "cargo: robusta coffee"
+    # One token whose offset includes the preceding space.
+    offsets = [(0, 0), (0, 6), (6, 14), (14, 21), (0, 0)]
+    labels = [-100, LABEL2ID["O"], LABEL2ID["B-COMMODITY"], LABEL2ID["I-COMMODITY"], -100]
+    decoded = bio_ids_to_spans(labels, offsets, text)
+    assert len(decoded) == 1
+    ent = decoded[0]
+    assert ent.text == "robusta coffee"
+    assert (ent.start, ent.end) == (7, 21)
+    assert text[ent.start:ent.end] == ent.text
+
+
+def test_decoded_span_trailing_comma_is_trimmed():
+    text = "steel coil, ammonia"
+    offsets = [(0, 0), (0, 5), (5, 11), (11, 19), (0, 0)]  # "coil," absorbed
+    labels = [-100, LABEL2ID["B-COMMODITY"], LABEL2ID["I-COMMODITY"], LABEL2ID["O"], -100]
+    decoded = bio_ids_to_spans(labels, offsets, text)
+    assert len(decoded) == 1
+    assert decoded[0].text == "steel coil"
+    assert (decoded[0].start, decoded[0].end) == (0, 10)
+
+
+def test_trailing_period_is_not_trimmed():
+    """ORG spans like 'Acme Trading Co.' legitimately end in a period."""
+    text = "Acme Trading Co."
+    offsets = _whitespace_offsets(text)
+    labels = [-100, LABEL2ID["B-ORG"], LABEL2ID["I-ORG"], LABEL2ID["I-ORG"], -100]
+    decoded = bio_ids_to_spans(labels, offsets, text)
+    assert decoded[0].text == "Acme Trading Co."
+
+
+def test_span_that_trims_to_empty_is_dropped():
+    text = "a , b"
+    offsets = [(0, 0), (0, 1), (2, 3), (4, 5), (0, 0)]
+    labels = [-100, LABEL2ID["O"], LABEL2ID["B-COMMODITY"], LABEL2ID["O"], -100]
+    decoded = bio_ids_to_spans(labels, offsets, text)
+    assert decoded == []
+
+
+def test_trim_disabled_returns_raw_slices():
+    text = "cargo: robusta coffee"
+    offsets = [(0, 0), (0, 6), (6, 14), (14, 21), (0, 0)]
+    labels = [-100, LABEL2ID["O"], LABEL2ID["B-COMMODITY"], LABEL2ID["I-COMMODITY"], -100]
+    decoded = bio_ids_to_spans(labels, offsets, text, trim=False)
+    assert decoded[0].text == " robusta coffee"
