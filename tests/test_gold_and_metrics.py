@@ -100,3 +100,34 @@ def test_per_type_buckets_split_commodity_by_polarity():
     # NEG bucket must have non-zero support because NEGATION_SEED includes
     # at least one NEG record.
     assert report.per_type["COMMODITY(NEG)"].support > 0
+
+
+def test_cargo_gold_coverage_floors():
+    """Guard the cargo-register coverage the gold set gained; future edits
+    must not silently regress it."""
+    from ner.eval.gold import CARGO_SEED, GOLD_SEED, split_gold
+
+    assert len(CARGO_SEED) >= 35
+
+    def caps_record(r):
+        letters = [c for c in r.text if c.isalpha()]
+        return letters and sum(c.isupper() for c in letters) / len(letters) > 0.9
+
+    assert sum(1 for r in GOLD_SEED if caps_record(r)) >= 5      # telex/B-L caps
+    assert any("\n" in r.text for r in GOLD_SEED)                # multi-line
+    assert any(len(r.text) > 500 for r in GOLD_SEED)             # windowing pin
+
+    commodity_spans = [
+        e for r in GOLD_SEED for e in r.entities if e.type == "COMMODITY"
+    ]
+    assert sum(1 for e in commodity_spans if len(e.text) > 60) >= 2   # XL
+    assert any(len(e.text) > 100 for e in commodity_spans)            # XL+
+
+    addr = sum(1 for r in GOLD_SEED for e in r.entities if e.type == "ADDRESS")
+    assert addr >= 8
+
+    # Each deterministic split half keeps enough NEG support to tune on.
+    for split in ("earlystop", "tune"):
+        half = split_gold(GOLD_SEED, split)
+        neg = sum(1 for r in half for e in r.entities if e.polarity == "NEG")
+        assert neg >= 15, (split, neg)
