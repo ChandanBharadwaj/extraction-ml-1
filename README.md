@@ -139,11 +139,20 @@ python -m scripts.build_seed
 python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
 python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
 
-# 3) Train. --gold-split earlystop keeps the early-stopping half of
-#    gold disjoint from the threshold-tuning half. Optional knobs:
+# 3) Train — no GPU required. The CPU recipe below fine-tunes
+#    deberta-v3-xsmall on a reduced sample in hours on a modern multi-core
+#    box; the export and serving layers are model-size agnostic.
+#    --gold-split earlystop keeps the early-stopping half of gold disjoint
+#    from the threshold-tuning half. Optional knobs:
 #    --class-weights neg_boost, --metric-for-best-model "f1_COMMODITY(NEG)".
-python -m scripts.train --train-jsonl data/train.jsonl \
-    --output-dir artifacts/ckpt --gold-split earlystop
+python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train_small.jsonl --n 8000
+python -m scripts.train --train-jsonl data/train_small.jsonl \
+    --output-dir artifacts/ckpt \
+    --base-model microsoft/deberta-v3-xsmall \
+    --epochs 2 --batch-size 8 \
+    --gold-split earlystop --class-weights neg_boost
+# (With a GPU available, use the default deberta-v3-base on the full 50k
+#  set instead — higher ceiling, same commands minus --base-model.)
 
 # 4) Export FP32 ONNX.
 python -m scripts.export_onnx --model-dir artifacts/ckpt --output artifacts/serve/model.onnx

@@ -60,7 +60,11 @@ class SpanF1Metric:
         decoded: list = []
         for i, rec in enumerate(self.gold):
             offsets = self._encoded[i]["offset_mapping"]
-            spans = bio_ids_to_spans(preds[i].tolist(), offsets, rec.text)
+            # Trainer pads eval logits to the batch max length; positions past
+            # this record's own token count have no offsets and must not be
+            # decoded.
+            pred_ids = preds[i].tolist()[: len(offsets)]
+            spans = bio_ids_to_spans(pred_ids, offsets, rec.text)
             decoded.append(spans)
         report = evaluate(decoded, self.gold)
         out = {
