@@ -6,7 +6,6 @@ the real DeBERTa tokenizer.
 """
 from __future__ import annotations
 
-import pytest
 
 from ner.bio import bio_ids_to_spans, char_spans_to_bio
 from ner.constants import LABEL2ID

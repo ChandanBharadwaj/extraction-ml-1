@@ -19,7 +19,7 @@ ner/
     pools.py          SQLite seed loader (sql/schema.sql)
     slot_fill.py      Deterministic offset generator
     free_gen.py       Regex relocation of LLM-emitted entity surfaces
-    noise.py          Lowercasing, punctuation drops, typos, truncation
+    noise.py          Casing (lower/UPPER), punctuation drops, typos, OCR, truncation
     assembler.py      Top-level data pipeline + JSONL I/O
   llm/
     claude_generator.py   Optional Anthropic SDK hook (prompt-cached)
@@ -118,6 +118,45 @@ entities = runtime.predict("Manifest: galvanized steel coil, anhydrous ammonia..
 
 Threading defaults are tuned for short records on CPU. For backlog scoring of
 millions of records, prefer multiprocessing over thread parallelism.
+
+Long inputs (multi-line packing lists, full B/L bodies) are handled by
+sliding-window inference: overlapping 256-token windows run as one batched
+session call and merge token-wise, so entities beyond the first window are
+still extracted. Inputs beyond `MAX_INPUT_CHARS` (4000) are truncated with a
+`UserWarning`.
+
+## Retrain runbook (after changing seed data, noise, or the gold set)
+
+The data-side improvements (seed pools, templates, noise transforms, loss
+weighting) are inert until a retrain; the serving/eval fixes apply to the
+existing artifact immediately. To pick everything up:
+
+```bash
+# 1) Regenerate the seed SQL from the seedgen source of truth.
+python -m scripts.build_seed
+
+# 2) Rebuild the pool DB and synthetic training set.
+python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
+python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
+
+# 3) Train (GPU). --gold-split earlystop keeps the early-stopping half of
+#    gold disjoint from the threshold-tuning half. Optional knobs:
+#    --class-weights neg_boost, --metric-for-best-model "f1_COMMODITY(NEG)".
+python -m scripts.train --train-jsonl data/train.jsonl \
+    --output-dir artifacts/ckpt --gold-split earlystop
+
+# 4) Export FP32 ONNX.
+python -m scripts.export_onnx --model-dir artifacts/ckpt --output artifacts/serve/model.onnx
+
+# 5) Tune thresholds on the OTHER gold half, cargo-focused. Alternatives:
+#    --objective f1_micro, or add --precision-floor-type "COMMODITY(NEG):0.9".
+python -m scripts.tune_threshold --artifact-dir artifacts/serve \
+    --eval-split tune --objective "f1_per_type:COMMODITY(NEG)"
+
+# 6) SLA spot-check on a long manifest (>2000 chars) — windowed inference
+#    should stay well under the 1 s/record CPU budget.
+python -m scripts.infer --artifact-dir artifacts/serve --text "$(cat sample_manifest.txt)"
+```
 
 ## Test
 

@@ -119,9 +119,12 @@ These cross-cut multiple files; touching them requires changing all consumers.
    "no" would silently flip gold polarity without re-labeling.
 
 5. **Synthetic data is never used for evaluation.** `ner.eval.gold.GOLD_SEED`
-   (35 hand-labeled records, offsets verified by Python) is the sole source
-   of truth for early stopping and threshold tuning. Synthetic-to-real
-   leakage breaks this guarantee.
+   (72 hand-labeled records — TDD + negation + cargo-register seeds, offsets
+   verified by Python) is the sole source of truth for early stopping and
+   threshold tuning. Synthetic-to-real leakage breaks this guarantee.
+   `split_gold` hash-partitions the set so `--gold-split earlystop`
+   (training) and `--eval-split tune` (threshold tuning) consume disjoint
+   halves.
 
 6. **Preprocessing is symmetric.** `ner.preprocess.Preprocessor` runs at
    training time (after `apply_noise`, before JSONL write) AND at inference
@@ -161,15 +164,21 @@ in the future) means updating the regex *and* the dispatch in
 
 `ner.eval.threshold_sweep` runs the model **once** over the gold set, caches
 softmax probabilities per token per label, then sweeps threshold grids
-entirely in numpy — no per-candidate model run. Two-stage search:
+entirely in numpy — no per-candidate model run. Gold records are projected
+through the runtime's preprocessor before encoding (`cache_probabilities`
+stores the cleaned records in `ProbCache.gold`), so tuning sees exactly the
+tokenization serving sees. Two-stage search:
 
 1. Global threshold (one value applied to every non-O label) over `[0, 0.99]`.
-2. Per-label refinement starting from the global optimum.
+2. Per-label refinement from the global optimum, repeated (≤3 passes) until a
+   full pass yields no improvement. Zero-support labels inherit the global
+   threshold.
 
 Objectives: `f1_micro` (default), `f1_macro`, `f1_per_type:<bucket>` (e.g.
 `COMMODITY(NEG)`), `max_f1_at_precision_floor`, `max_f1_at_recall_floor`. The
 last two refuse to write `thresholds.json` if no threshold combination
-satisfies the floor (non-zero exit with diagnostics).
+satisfies the floor (non-zero exit with diagnostics). Repeatable
+`--precision-floor-type BUCKET:FLOOR` constrains any objective per-bucket.
 
 ## Where to look first
 
@@ -177,5 +186,6 @@ satisfies the floor (non-zero exit with diagnostics).
 - Adding a new noise transformation → `ner/data/noise.py` (honor `preserve_spans` and entity-surface guards; reproject offsets via `_apply_to_record`).
 - Adding new template patterns or pools → edit the source-of-truth Python modules in `scripts/seedgen/` (one per scenario family: `persons.py`, `orgs.py`, `addresses.py`, `commodities.py`, `decoys.py`, `templates.py`), then regenerate the SQL with `python -m scripts.build_seed`. The builder dedups, validates that every `{decoy:slot}` a template references has a backing pool, and emits both `sql/seed.sql` (SQLite) and `sql/postgres/seed.sql` (Postgres). `tests/test_seed_full.py` keeps the committed SQL in sync. The tiny `sql/example_seed.sql` is the smoke seed used by `tests/test_pools_sqlite.py`; leave it alone unless you mean to touch that test.
 - Tuning the serving operating point → `ner/eval/threshold_sweep.py` + `scripts/tune_threshold.py`.
+- Long-input windowing / decoded-span edge trimming → `ner/infer/runtime.py` (`_forward`) + `ner/bio.py` (`bio_ids_to_spans` trim). The BIO decoder is shared by train metrics, threshold sweep, and serving — behavior changes there affect all three.
 - Adding / changing a preprocessing step → `ner/preprocess.py` (must update the position map; train and inference will both adopt it via `preprocess.json`).
 - LLM data generation (Anthropic SDK with prompt caching, optional) → `ner/llm/claude_generator.py`.

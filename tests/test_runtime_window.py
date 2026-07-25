@@ -158,3 +158,27 @@ def test_predict_batch_mixes_short_and_long_inputs():
     assert [(e.start, e.end) for e in outs[0]] == [(10, 11)]
     assert (400, 402) in [(e.start, e.end) for e in outs[1]]
     assert outs[2] == []
+
+
+def test_runtime_threshold_gate_demotes_low_confidence_argmax():
+    """With thresholds loaded, a below-floor B-COMMODITY argmax is demoted to
+    O in the served path (this exercises _decode_logits' threshold branch,
+    which no other test reaches)."""
+    from ner.bio import softmax
+    from ner.eval.threshold_sweep import thresholds_dict_to_array
+
+    session = _IdMappedSession()
+    text = "a" * 50
+    rt = _fake_runtime(session, id_for_char={10: B_TOK})
+
+    # The stub emits logit 5.0 for B-COMMODITY vs 0.0 elsewhere -> softmax
+    # confidence ~0.94. A floor above that demotes; below it, keeps.
+    conf = float(softmax(np.array([[5.0] + [0.0] * (NUM_LABELS - 1)]))[0, 0])
+    assert 0.90 < conf < 0.99
+
+    rt.thresholds = thresholds_dict_to_array({"B-COMMODITY": 0.999})
+    assert rt.predict(text) == []
+
+    rt.thresholds = thresholds_dict_to_array({"B-COMMODITY": 0.5})
+    ents = rt.predict(text)
+    assert [(e.start, e.end, e.type) for e in ents] == [(10, 11, "COMMODITY")]

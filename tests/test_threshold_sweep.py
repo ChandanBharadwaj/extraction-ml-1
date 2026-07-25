@@ -22,7 +22,6 @@ from ner.eval.threshold_sweep import (
     load_thresholds_json,
     parse_objective,
     sweep,
-    thresholds_dict_to_array,
     write_thresholds_json,
 )
 

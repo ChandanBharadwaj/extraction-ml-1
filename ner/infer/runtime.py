@@ -29,7 +29,6 @@ from ner.bio import apply_threshold_gate, bio_ids_to_spans, softmax
 from ner.constants import (
     MAX_INPUT_CHARS,
     MAX_SEQ_LEN,
-    NUM_LABELS,
     WINDOW_OVERLAP_TOKENS,
 )
 from ner.preprocess import Preprocessor
