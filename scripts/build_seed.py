@@ -35,8 +35,13 @@ SQLITE_OUT = REPO_ROOT / "sql" / "seed.sql"
 POSTGRES_OUT = REPO_ROOT / "sql" / "postgres" / "seed.sql"
 
 # Mirror of ner.data.slot_fill._SLOT_RE so we can validate templates without
-# importing the generator's runtime dependencies.
-_SLOT_RE = re.compile(r"\{(?P<kind>[A-Za-z_]+)(?:#(?P<idx>\d+))?(?::(?P<sub>[A-Za-z_]+))?\}")
+# importing the generator's runtime dependencies. Keep in sync.
+_SLOT_RE = re.compile(
+    r"\{(?P<kind>[A-Za-z_]+)(?:#(?P<idx>\d+))?(?:~(?P<pair>\d+))?(?::(?P<sub>[A-Za-z_]+))?\}"
+)
+
+# Mirror of ner.data.slot_fill.PAIRABLE_ENTITY_TYPES.
+_PAIRABLE_ENTITY_TYPES = frozenset({"COMMODITY"})
 
 _ROWS_PER_STATEMENT = 200
 
@@ -96,13 +101,19 @@ def validate() -> dict[str, object]:
     if not templates:
         errors.append("no templates")
 
-    # Templates: every slot must resolve to a real pool.
+    # Templates: every slot must resolve to a real pool, and #/~ must be
+    # used per the grammar (mutually exclusive; ~ only on pairable types).
     valid_entity_kinds = set(ENTITY_TYPES) | {f"NEG_{et}" for et in ENTITY_TYPES}
+    any_pair_slot = False
     for tmpl in templates:
         for m in _SLOT_RE.finditer(tmpl):
             kind = m.group("kind")
             sub = m.group("sub")
+            if m.group("idx") is not None and m.group("pair") is not None:
+                errors.append(f"template slot mixes #index and ~pair: {tmpl!r}")
             if kind == "decoy":
+                if m.group("pair") is not None:
+                    errors.append(f"template has ~pair on a decoy slot: {tmpl!r}")
                 if not sub:
                     errors.append(f"template has decoy slot without name: {tmpl!r}")
                 elif sub not in decoy_pools:
@@ -110,6 +121,24 @@ def validate() -> dict[str, object]:
             else:
                 if kind.upper() not in valid_entity_kinds:
                     errors.append(f"template references unknown entity kind {kind!r}: {tmpl!r}")
+                if m.group("pair") is not None:
+                    any_pair_slot = True
+                    base = kind.upper().removeprefix("NEG_")
+                    if base not in _PAIRABLE_ENTITY_TYPES:
+                        errors.append(
+                            f"template has ~pair on non-pairable type {kind!r}: {tmpl!r}"
+                        )
+
+    # ~pair slots need at least one head-noun family in the commodity pool
+    # (a qualified value whose bare head is also a pool value).
+    if any_pair_slot:
+        from ner.data.slot_fill import build_family_index
+
+        if not build_family_index(entity_pools["COMMODITY"]):
+            errors.append(
+                "templates use ~pair slots but the COMMODITY pool has no "
+                "head-noun families"
+            )
 
     if errors:
         raise ValueError("seed validation failed:\n  - " + "\n  - ".join(errors))

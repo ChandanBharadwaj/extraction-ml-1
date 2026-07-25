@@ -142,8 +142,13 @@ Templates live in the `templates` table of the SQLite pool DB and use:
 
 - `{PERSON}` `{ORG}` `{ADDRESS}` `{COMMODITY}` — entity slots (label-bearing).
 - `{NEG_COMMODITY}` — samples from the COMMODITY pool, emits `polarity=NEG`.
-- `{PERSON#1}` `{PERSON#2}` `{NEG_COMMODITY#1}` — indexed slots that force
-  distinct samples when the same type repeats in one template.
+- `{PERSON#1}` `{PERSON#2}` `{NEG_COMMODITY#1}` — indexed slots name a
+  variable: repeating the same index repeats the same value (alias /
+  repeated-entity patterns), while different indices force distinct samples.
+- `{NEG_COMMODITY~1}` … `{COMMODITY~1}` — paired slots: all slots sharing a
+  pair id draw from one head-noun family (NEG gets a qualified form like
+  "treated wood", POS usually gets the bare head "wood"). `#` and `~` are
+  mutually exclusive; `~` is only valid on COMMODITY / NEG_COMMODITY.
 - `{decoy:qty}` `{decoy:neg_cue}` `{decoy:contrast_cue}` `{decoy:frozen_compound}` etc. —
   non-entity fillers from the `decoy_pools` table.
 
