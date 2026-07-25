@@ -139,7 +139,7 @@ python -m scripts.build_seed
 python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
 python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
 
-# 3) Train (GPU). --gold-split earlystop keeps the early-stopping half of
+# 3) Train. --gold-split earlystop keeps the early-stopping half of
 #    gold disjoint from the threshold-tuning half. Optional knobs:
 #    --class-weights neg_boost, --metric-for-best-model "f1_COMMODITY(NEG)".
 python -m scripts.train --train-jsonl data/train.jsonl \
@@ -157,6 +157,49 @@ python -m scripts.tune_threshold --artifact-dir artifacts/serve \
 #    should stay well under the 1 s/record CPU budget.
 python -m scripts.infer --artifact-dir artifacts/serve --text "$(cat sample_manifest.txt)"
 ```
+
+### No GPU?
+
+Only step 3 wants one — everything else in this pipeline (data generation,
+ONNX export, threshold tuning, serving, the test suite) is CPU-only by
+design. Three routes, in order of preference:
+
+1. **Free hosted GPU (recommended).** Google Colab (free T4) or a Kaggle
+   notebook (free T4/P100, ~30 h/week) comfortably fits this fine-tune.
+   In a fresh notebook:
+
+   ```bash
+   !git clone <your-repo-url> && cd extraction-ml-1 && pip install -e .[train]
+   !cd extraction-ml-1 && python -m scripts.generate_data --init-db data/pools.sqlite --seed-sql sql/seed.sql
+   !cd extraction-ml-1 && python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train.jsonl --n 50000
+   !cd extraction-ml-1 && python -m scripts.train --train-jsonl data/train.jsonl \
+       --output-dir artifacts/ckpt --gold-split earlystop --class-weights neg_boost
+   ```
+
+   Then zip and download `artifacts/ckpt/`, and run steps 4–6 locally on CPU.
+   A 50k-record, 3-epoch run on a T4 is roughly 1–2 hours.
+
+2. **CPU fine-tune with a smaller footprint.** The HF Trainer falls back to
+   CPU automatically; make the run tractable by shrinking everything:
+
+   ```bash
+   python -m scripts.generate_data --sqlite data/pools.sqlite --out data/train_small.jsonl --n 8000
+   python -m scripts.train --train-jsonl data/train_small.jsonl \
+       --output-dir artifacts/ckpt \
+       --base-model microsoft/deberta-v3-xsmall \
+       --epochs 2 --batch-size 8 --gold-split earlystop
+   ```
+
+   Expect several hours on a modern 8-core machine (deberta-v3-base at the
+   full 50k on CPU is days — don't). `deberta-v3-xsmall`/`-small` trade some
+   accuracy for a 5–10× smaller backbone; the export and serving layers are
+   model-size agnostic, so nothing else changes.
+
+3. **Skip retraining for now.** The runtime and eval fixes on this branch
+   (sliding-window long-input handling, span-edge trimming, threshold-tuner
+   parity, the enlarged cargo gold set) improve the *existing* artifact
+   without any training — re-run step 5 against your current
+   `artifacts/serve` to re-tune thresholds on the new gold set and deploy.
 
 ## Test
 
