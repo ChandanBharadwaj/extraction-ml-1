@@ -3281,7 +3281,6 @@ Ship-to:	{ADDRESS}'),
     ('CONSIGNEE:{ORG}  CONTACT:{PERSON}  ITEM:{COMMODITY}'),
     ('{decoy:invoice_id}	{ORG}	{COMMODITY}	{decoy:currency}{decoy:qty}'),
     ('{PERSON}      {ORG}      {ADDRESS}'),
-    ('{PERSON}{ORG}'),
     ('{PERSON}|{ORG}|{COMMODITY}'),
     ('CARGO: {COMMODITY}  DEST: {ADDRESS}  CARRIER: {ORG}'),
     ('BL NO {decoy:ref_id} COMMODITY {COMMODITY} SHIPPER {ORG}'),
@@ -3393,6 +3392,7 @@ Ship-to:	{ADDRESS}'),
     ('{decoy:unit} of {COMMODITY} per {decoy:ref_id}.'),
     ('{ORG} ships {decoy:qty} {COMMODITY} ({decoy:unit}).'),
     ('{ORG#1} | {ORG#1}'),
+    ('{PERSON}{ORG}'),
     ('{PERSON}|{ORG}'),
     ('{PERSON#1} {PERSON#2}'),
     ('{PERSON}, {ORG}.'),
@@ -3444,4 +3444,61 @@ Approved: {COMMODITY#1}.
     ('{ORG} ships {decoy:qty} {COMMODITY#1}, {decoy:qty} {COMMODITY#2}, {decoy:qty} {COMMODITY#3}, {decoy:qty} {COMMODITY#4}.'),
     ('{PERSON}|{COMMODITY}|{ADDRESS}'),
     ('Under {decoy:incoterm} terms, {ORG} confirms this shipment {decoy:neg_cue} {NEG_COMMODITY}.'),
-    ('{decoy:neg_cue} {NEG_COMMODITY#1}, {NEG_COMMODITY#2}; acceptable goods: {COMMODITY#3} from {ORG}.');
+    ('{decoy:neg_cue} {NEG_COMMODITY#1}, {NEG_COMMODITY#2}; acceptable goods: {COMMODITY#3} from {ORG}.'),
+    ('{decoy:container_spec} STC {decoy:qty_bare} {COMMODITY}');
+INSERT OR IGNORE INTO templates (template) VALUES
+    ('SAID TO CONTAIN: {COMMODITY} | GROSS WEIGHT {decoy:qty_bare}'),
+    ('DESCRIPTION OF GOODS: {COMMODITY} | HS {decoy:ref_id}'),
+    ('{decoy:container_spec} STC {COMMODITY} | {decoy:seal_marks} | {decoy:qty_bare}'),
+    ('{decoy:container_spec} STC {COMMODITY#1} AND {COMMODITY#2} | {decoy:seal_marks}'),
+    ('CARGO: {COMMODITY} {decoy:bulk_packaging} | {decoy:qty_bare}'),
+    ('recap: {decoy:container_spec} stc {COMMODITY}, {decoy:bulk_packaging}, {decoy:incoterm} {decoy:port}'),
+    ('{COMMODITY} | {decoy:dg_class} | {decoy:qty_bare}'),
+    ('DG DECLARATION: {COMMODITY}, {decoy:dg_class}, {decoy:qty_bare}, {decoy:bulk_packaging}'),
+    ('FREIGHT PREPAID | {COMMODITY} | {decoy:qty_bare} | {decoy:incoterm} {decoy:port}'),
+    ('{COMMODITY} NET {decoy:qty_bare} GROSS {decoy:qty_bare}'),
+    ('{decoy:qty_bare} {COMMODITY}'),
+    ('{COMMODITY} {decoy:qty_bare} NET'),
+    ('{decoy:seal_marks} | DESCRIPTION: {COMMODITY} | {decoy:qty_bare}'),
+    ('CUSTOMS DECLARATION: {COMMODITY} ORIGIN {decoy:port} HS {decoy:ref_id}'),
+    ('VESSEL: {decoy:vessel} | POL {decoy:port} POD {decoy:port} | CARRIER {decoy:carrier}'),
+    ('VESSEL: {decoy:vessel} | POL {decoy:port} | NOTIFY PARTY: {ORG}'),
+    ('SHIPPER: {ORG#1} | CONSIGNEE: {ORG#2} | CARRIER: {decoy:carrier} | FREIGHT PREPAID'),
+    ('{decoy:vessel} VOY {decoy:ref_id} | {decoy:port} TO {decoy:port} | CARGO: {COMMODITY}'),
+    ('Booking confirmed on {decoy:vessel} ex {decoy:port}: {decoy:container_spec} {COMMODITY}, {decoy:incoterm}.'),
+    ('{decoy:vessel} ETA {decoy:port} {decoy:date}. {decoy:boilerplate}'),
+    ('ARRIVAL NOTICE: {decoy:vessel} AT {decoy:port} {decoy:date} | CNEE {ORG} | {COMMODITY}'),
+    ('TRANSHIPMENT VIA {decoy:port} ON {decoy:vessel} | {decoy:container_spec} | SEAL {decoy:ref_id}'),
+    ('{decoy:container_spec} ROLLED TO {decoy:vessel} ETD {decoy:date} — contact {PERSON} at {ORG}'),
+    ('PACKING LIST
+1. {decoy:qty_bare} {COMMODITY#1}
+2. {decoy:qty_bare} {COMMODITY#2}
+3. {decoy:qty_bare} {COMMODITY#3}'),
+    ('ITEM | DESCRIPTION | QTY
+1 | {COMMODITY#1} | {decoy:qty_bare}
+2 | {COMMODITY#2} | {decoy:qty_bare}'),
+    ('1) {COMMODITY#1} {decoy:bulk_packaging}
+2) {COMMODITY#2} {decoy:bulk_packaging}'),
+    ('{decoy:invoice_id}
+{COMMODITY#1} — {decoy:currency}{decoy:qty}
+{COMMODITY#2} — {decoy:currency}{decoy:qty}'),
+    ('MANIFEST {decoy:ref_id}
+1. {COMMODITY#1}
+2. {COMMODITY#2}
+3. {COMMODITY#3}
+4. {COMMODITY#4}
+5. {COMMODITY#5}'),
+    ('Shipment {decoy:neg_cue} {NEG_COMMODITY~1}{decoy:contrast_cue} {COMMODITY~1} is included.'),
+    ('NIL {NEG_COMMODITY~1} DECLARED. CARGO: {COMMODITY~1}.'),
+    ('Certificate: consignment {decoy:neg_cue} {NEG_COMMODITY~1}; {COMMODITY~1} conforms.'),
+    ('CUSTOMS REMARK: {decoy:neg_cue} {NEG_COMMODITY~1}. APPROVED GOODS: {COMMODITY~1}.'),
+    ('{ORG} confirms {decoy:neg_cue} {NEG_COMMODITY~1}{decoy:contrast_cue} {COMMODITY~1}.'),
+    ('Per inspection at {ADDRESS}, cargo {decoy:neg_cue} {NEG_COMMODITY~1}; only {COMMODITY~1} was found.'),
+    ('{decoy:container_spec} STC {COMMODITY~1} ONLY — {decoy:neg_cue} {NEG_COMMODITY~1}'),
+    ('{decoy:salutation} {PERSON}, we ship {COMMODITY~1} but {decoy:neg_cue} {NEG_COMMODITY~1}.'),
+    ('WE OFFER {COMMODITY} {decoy:incoterm} {decoy:port} SHIPMENT {decoy:date}'),
+    ('BUYER REQUIRES {decoy:qty_bare} {COMMODITY} DELIVERY {decoy:port}'),
+    ('CARGO {decoy:neg_cue} {NEG_COMMODITY} PER SHIPPER DECLARATION'),
+    ('INSPECTION BY {ORG} CONFIRMS {COMMODITY} ON BOARD {decoy:vessel}'),
+    ('RECAP: {COMMODITY#1} / {COMMODITY#2} / {COMMODITY#3} ALL {decoy:incoterm} {decoy:port}'),
+    ('DELIVER TO {ADDRESS} ATTN {PERSON} CARGO {COMMODITY}');
