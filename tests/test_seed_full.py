@@ -37,8 +37,26 @@ def test_seed_validation_passes():
     assert ep["PERSON"] >= 300
     assert ep["ORG"] >= 300
     assert ep["ADDRESS"] >= 150
-    assert ep["COMMODITY"] >= 250
-    assert summary["templates"] >= 100
+    assert ep["COMMODITY"] >= 600
+    assert summary["templates"] >= 240
+
+
+def test_commodity_pool_cargo_coverage():
+    """The cargo/trade forms that dominate real manifests must stay covered."""
+    from ner.data.slot_fill import build_family_index
+    from scripts.seedgen.commodities import COMMODITIES
+
+    values = build_seed._dedup(COMMODITIES)
+    # XXL trade specifications (long B/L description lines).
+    assert sum(1 for v in values if len(v) > 120) >= 5
+    # HS-heading / telex ALL-CAPS surfaces.
+    all_caps = [v for v in values if v.isupper() and any(c.isalpha() for c in v)]
+    assert len(all_caps) >= 40
+    # Generic-cargo declarations.
+    for needed in ("general cargo", "personal effects", "used machinery", "spare parts"):
+        assert needed in values
+    # Head-noun families backing the ~pair slot grammar.
+    assert len(build_family_index(values)) >= 90
 
 
 def test_emitted_sql_loads_and_generates(tmp_path):
@@ -68,6 +86,39 @@ def test_both_polarities_and_preserve_spans(tmp_path):
 
     # Zero-entity (true-negative) templates must surface too.
     assert any(len(rec.entities) == 0 for rec in records)
+
+
+def test_cargo_templates_generate(tmp_path):
+    """The cargo-document register must actually surface in generated data."""
+    db = _build_sqlite(tmp_path)
+    pools = load_from_sqlite(db)
+    records = generate_records(pools, GenConfig(seed=3, n_records=2000))
+
+    texts = [rec.text for rec in records]
+    # B/L furniture reaches the training distribution.
+    assert any("STC" in t for t in texts)
+    assert any("SAID TO CONTAIN" in t for t in texts)
+    assert any("VESSEL:" in t or "VOY" in t for t in texts)
+    # Multi-line packing-list records exist (pre-preprocess, \n intact).
+    assert any("\n" in t for t in texts)
+
+    # ~pair templates produce NEG/POS entities sharing a head-noun suffix.
+    def _paired(rec):
+        negs = [e for e in rec.entities if e.polarity == "NEG"]
+        poss = [e for e in rec.entities if e.polarity == "POS" and e.type == "COMMODITY"]
+        for n in negs:
+            for p in poss:
+                shorter, longer = sorted([n.text.lower(), p.text.lower()], key=len)
+                if longer.endswith(" " + shorter):
+                    return True
+        return False
+
+    assert any(_paired(rec) for rec in records)
+
+    # Boundary discipline: no generated span has whitespace at its edges.
+    for rec in records:
+        for e in rec.entities:
+            assert e.text == e.text.strip(), (rec.text, e)
 
 
 def test_postgres_sql_builds():

@@ -33,4 +33,15 @@ ALLOWED_DECOY_SLOTS: tuple[str, ...] = (
     "contrast_cue",   # PRESERVED: ", but only", ", instead" ...
     "frozen_compound",# dissolved negation cues, NOT negations ("sugar-free")
     "incoterm",       # "FOB", "CIF", "DDP"
+    # Cargo-document furniture: the top COMMODITY false-positive sources on
+    # bills of lading / manifests. All excluded from every entity span.
+    "vessel",         # vessel names ("MV EVER GIVEN", "M/T SEA PEARL V.023E")
+    "container_spec", # container count/type ("1x20GP", "2X40HC")
+    "port",           # port names / UN-LOCODEs ("CNSHA", "NHAVA SHEVA")
+    "carrier",        # carrier SCAC codes ("MAEU", "MSCU") — full carrier
+                      # company names belong in the ORG pool, not here
+    "seal_marks",     # seal / marks-and-numbers lines ("SEAL NO. CN1234567")
+    "qty_bare",       # bare qty+unit, no trailing "of" ("12,000 KG", "500 BAGS")
+    "bulk_packaging", # stowage phrase after the span ("in 50kg PP bags")
+    "dg_class",       # hazard metadata ("IMO CLASS 8", "PACKING GROUP II")
 )

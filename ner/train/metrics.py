@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ner.bio import bio_ids_to_spans
+from ner.constants import MAX_SEQ_LEN
 from ner.eval.metrics import evaluate
 from ner.preprocess import Preprocessor
 from ner.schema import Record
@@ -31,6 +32,7 @@ class SpanF1Metric:
         tokenizer: "PreTrainedTokenizerFast",
         gold_records: list[Record],
         preprocessor: Preprocessor | None = None,
+        max_length: int = MAX_SEQ_LEN,
     ):
         self.tokenizer = tokenizer
         self.preprocessor = preprocessor or Preprocessor()
@@ -46,7 +48,7 @@ class SpanF1Metric:
                 r.text,
                 return_offsets_mapping=True,
                 truncation=True,
-                max_length=256,
+                max_length=max_length,
             ) for r in self.gold
         ]
 
@@ -58,7 +60,11 @@ class SpanF1Metric:
         decoded: list = []
         for i, rec in enumerate(self.gold):
             offsets = self._encoded[i]["offset_mapping"]
-            spans = bio_ids_to_spans(preds[i].tolist(), offsets, rec.text)
+            # Trainer pads eval logits to the batch max length; positions past
+            # this record's own token count have no offsets and must not be
+            # decoded.
+            pred_ids = preds[i].tolist()[: len(offsets)]
+            spans = bio_ids_to_spans(pred_ids, offsets, rec.text)
             decoded.append(spans)
         report = evaluate(decoded, self.gold)
         out = {

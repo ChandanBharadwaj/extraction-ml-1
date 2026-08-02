@@ -195,8 +195,8 @@ TEMPLATES: list[str] = [
     # E-4: OCR column-drift line
     "{PERSON}      {ORG}      {ADDRESS}",
 
-    # E-5: OCR with no separators (adjacency case §6.4)
-    "{PERSON}{ORG}",
+    # E-5: (removed — duplicate of T-2 {PERSON}{ORG}; build_seed dedups but
+    # the source of truth should not carry duplicates)
 
     # E-6: OCR pipe-delimited tight
     "{PERSON}|{ORG}|{COMMODITY}",
@@ -717,5 +717,163 @@ TEMPLATES: list[str] = [
 
     # W-20: Multi-target denial + positive in same record (5 entities)
     "{decoy:neg_cue} {NEG_COMMODITY#1}, {NEG_COMMODITY#2}; acceptable goods: {COMMODITY#3} from {ORG}.",
+
+    # -------------------------------------------------------------------------
+    # X. BILL-OF-LADING BODY LINES — STC / container-spec / seal / weight
+    # furniture around the commodity span (§12 manifests; §8.1 boundaries).
+    # Mostly ALL-CAPS: telex casing is the dominant register on real B/Ls.
+    # -------------------------------------------------------------------------
+
+    # X-1: Container spec + STC + bare qty
+    "{decoy:container_spec} STC {decoy:qty_bare} {COMMODITY}",
+
+    # X-2: SAID TO CONTAIN with gross weight
+    "SAID TO CONTAIN: {COMMODITY} | GROSS WEIGHT {decoy:qty_bare}",
+
+    # X-3: Description-of-goods line with HS ref
+    "DESCRIPTION OF GOODS: {COMMODITY} | HS {decoy:ref_id}",
+
+    # X-4: Full B/L cargo line with seal
+    "{decoy:container_spec} STC {COMMODITY} | {decoy:seal_marks} | {decoy:qty_bare}",
+
+    # X-5: Two-commodity container line
+    "{decoy:container_spec} STC {COMMODITY#1} AND {COMMODITY#2} | {decoy:seal_marks}",
+
+    # X-6: Commodity + stowage packaging (span ends before packaging)
+    "CARGO: {COMMODITY} {decoy:bulk_packaging} | {decoy:qty_bare}",
+
+    # X-7: Lower-case broker recap of a container line
+    "recap: {decoy:container_spec} stc {COMMODITY}, {decoy:bulk_packaging}, {decoy:incoterm} {decoy:port}",
+
+    # X-8: DG line — commodity with class metadata outside the span
+    "{COMMODITY} | {decoy:dg_class} | {decoy:qty_bare}",
+
+    # X-9: DG declaration sentence
+    "DG DECLARATION: {COMMODITY}, {decoy:dg_class}, {decoy:qty_bare}, {decoy:bulk_packaging}",
+
+    # X-10: Freight terms + commodity
+    "FREIGHT PREPAID | {COMMODITY} | {decoy:qty_bare} | {decoy:incoterm} {decoy:port}",
+
+    # X-11: Net/gross weight sandwich
+    "{COMMODITY} NET {decoy:qty_bare} GROSS {decoy:qty_bare}",
+
+    # X-12: Bare qty directly before span, no "of" (§8.1)
+    "{decoy:qty_bare} {COMMODITY}",
+
+    # X-13: Bare qty after span
+    "{COMMODITY} {decoy:qty_bare} NET",
+
+    # X-14: Marks-and-numbers line preceding cargo description
+    "{decoy:seal_marks} | DESCRIPTION: {COMMODITY} | {decoy:qty_bare}",
+
+    # X-15: Customs declaration line
+    "CUSTOMS DECLARATION: {COMMODITY} ORIGIN {decoy:port} HS {decoy:ref_id}",
+
+    # -------------------------------------------------------------------------
+    # Y. MANIFEST HEADER FURNITURE — vessel / voyage / ports / carrier codes.
+    # Several are zero-COMMODITY records that look maximally like manifests:
+    # the model must learn that vessels, ports, and carrier codes are not
+    # commodities (top false-positive source).
+    # -------------------------------------------------------------------------
+
+    # Y-1: Full header, zero entities
+    "VESSEL: {decoy:vessel} | POL {decoy:port} POD {decoy:port} | CARRIER {decoy:carrier}",
+
+    # Y-2: Header with notify party (ORG labeled)
+    "VESSEL: {decoy:vessel} | POL {decoy:port} | NOTIFY PARTY: {ORG}",
+
+    # Y-3: Shipper/consignee block (ORGs labeled, carrier code decoy)
+    "SHIPPER: {ORG#1} | CONSIGNEE: {ORG#2} | CARRIER: {decoy:carrier} | FREIGHT PREPAID",
+
+    # Y-4: Header + cargo line
+    "{decoy:vessel} VOY {decoy:ref_id} | {decoy:port} TO {decoy:port} | CARGO: {COMMODITY}",
+
+    # Y-5: Booking confirmation prose
+    "Booking confirmed on {decoy:vessel} ex {decoy:port}: {decoy:container_spec} {COMMODITY}, {decoy:incoterm}.",
+
+    # Y-6: Zero-entity ops message
+    "{decoy:vessel} ETA {decoy:port} {decoy:date}. {decoy:boilerplate}",
+
+    # Y-7: Arrival notice with consignee + cargo
+    "ARRIVAL NOTICE: {decoy:vessel} AT {decoy:port} {decoy:date} | CNEE {ORG} | {COMMODITY}",
+
+    # Y-8: Transhipment line, zero commodity
+    "TRANSHIPMENT VIA {decoy:port} ON {decoy:vessel} | {decoy:container_spec} | SEAL {decoy:ref_id}",
+
+    # Y-9: Roll-over notice with person contact
+    "{decoy:container_spec} ROLLED TO {decoy:vessel} ETD {decoy:date} — contact {PERSON} at {ORG}",
+
+    # -------------------------------------------------------------------------
+    # Z. PACKING LISTS / LINE-ITEM BLOCKS — multi-line numbered items.
+    # The preprocessor collapses \n to a single space symmetrically at train
+    # and serve, so these teach dense line-item adjacency.
+    # -------------------------------------------------------------------------
+
+    # Z-1: Numbered three-item packing list
+    "PACKING LIST\n1. {decoy:qty_bare} {COMMODITY#1}\n2. {decoy:qty_bare} {COMMODITY#2}\n3. {decoy:qty_bare} {COMMODITY#3}",
+
+    # Z-2: Packing list with header row
+    "ITEM | DESCRIPTION | QTY\n1 | {COMMODITY#1} | {decoy:qty_bare}\n2 | {COMMODITY#2} | {decoy:qty_bare}",
+
+    # Z-3: Two-line item block with packaging
+    "1) {COMMODITY#1} {decoy:bulk_packaging}\n2) {COMMODITY#2} {decoy:bulk_packaging}",
+
+    # Z-4: Invoice-style lines with amounts
+    "{decoy:invoice_id}\n{COMMODITY#1} — {decoy:currency}{decoy:qty}\n{COMMODITY#2} — {decoy:currency}{decoy:qty}",
+
+    # Z-5: Long five-item manifest (adjacency + serial spans)
+    "MANIFEST {decoy:ref_id}\n1. {COMMODITY#1}\n2. {COMMODITY#2}\n3. {COMMODITY#3}\n4. {COMMODITY#4}\n5. {COMMODITY#5}",
+
+    # -------------------------------------------------------------------------
+    # P2. PAIRED NEG/POS HEAD-NOUN TEMPLATES — the ~ grammar guarantees the
+    # denial targets a qualified form while the bare head stays asserted
+    # (§5.4 subtype-qualifier discipline; the pattern the gold set tests).
+    # -------------------------------------------------------------------------
+
+    # P2-1: Classic contrast
+    "Shipment {decoy:neg_cue} {NEG_COMMODITY~1}{decoy:contrast_cue} {COMMODITY~1} is included.",
+
+    # P2-2: Telex NIL declaration + cargo
+    "NIL {NEG_COMMODITY~1} DECLARED. CARGO: {COMMODITY~1}.",
+
+    # P2-3: Certificate wording
+    "Certificate: consignment {decoy:neg_cue} {NEG_COMMODITY~1}; {COMMODITY~1} conforms.",
+
+    # P2-4: Customs remark, caps
+    "CUSTOMS REMARK: {decoy:neg_cue} {NEG_COMMODITY~1}. APPROVED GOODS: {COMMODITY~1}.",
+
+    # P2-5: Org subject + both polarities
+    "{ORG} confirms {decoy:neg_cue} {NEG_COMMODITY~1}{decoy:contrast_cue} {COMMODITY~1}.",
+
+    # P2-6: Long scope distance before the paired positive
+    "Per inspection at {ADDRESS}, cargo {decoy:neg_cue} {NEG_COMMODITY~1}; only {COMMODITY~1} was found.",
+
+    # P2-7: B/L style with container furniture
+    "{decoy:container_spec} STC {COMMODITY~1} ONLY — {decoy:neg_cue} {NEG_COMMODITY~1}",
+
+    # P2-8: Email prose with person
+    "{decoy:salutation} {PERSON}, we ship {COMMODITY~1} but {decoy:neg_cue} {NEG_COMMODITY~1}.",
+
+    # -------------------------------------------------------------------------
+    # V2. TELEX / ALL-CAPS PROSE — uppercase register beyond B/L lines
+    # -------------------------------------------------------------------------
+
+    # V2-1: Caps offer line
+    "WE OFFER {COMMODITY} {decoy:incoterm} {decoy:port} SHIPMENT {decoy:date}",
+
+    # V2-2: Caps requirement
+    "BUYER REQUIRES {decoy:qty_bare} {COMMODITY} DELIVERY {decoy:port}",
+
+    # V2-3: Caps denial
+    "CARGO {decoy:neg_cue} {NEG_COMMODITY} PER SHIPPER DECLARATION",
+
+    # V2-4: Caps inspection note with org
+    "INSPECTION BY {ORG} CONFIRMS {COMMODITY} ON BOARD {decoy:vessel}",
+
+    # V2-5: Caps multi-commodity recap
+    "RECAP: {COMMODITY#1} / {COMMODITY#2} / {COMMODITY#3} ALL {decoy:incoterm} {decoy:port}",
+
+    # V2-6: Caps address destination
+    "DELIVER TO {ADDRESS} ATTN {PERSON} CARGO {COMMODITY}",
 
 ]

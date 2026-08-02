@@ -133,6 +133,97 @@ def test_preserve_spans_NOT_recorded_for_neutral_decoys():
     assert "preserve_spans" not in rec.meta
 
 
+def _family_pools() -> Pools:
+    """Pools whose COMMODITY values form head-noun families."""
+    pools = _pools()
+    pools.add_entity("COMMODITY", "wood")
+    pools.add_entity("COMMODITY", "treated wood")
+    pools.add_entity("COMMODITY", "special wood")
+    pools.add_entity("COMMODITY", "cane sugar")  # head for "raw cane sugar"
+    return pools
+
+
+def test_repeated_indexed_slot_reuses_value():
+    pools = _pools()
+    rng = random.Random(0)
+    rec = fill_template("{ORG#1} | {ORG#1}", pools, rng)
+    rec.validate()
+    orgs = [e.text for e in rec.entities if e.type == "ORG"]
+    assert len(orgs) == 2
+    assert orgs[0] == orgs[1]
+
+
+def test_repeated_indexed_slot_alias_pattern():
+    pools = _pools()
+    rng = random.Random(5)
+    rec = fill_template(
+        "Supplier has {COMMODITY#1}; buyer requests {COMMODITY#1}.",
+        pools, rng,
+    )
+    rec.validate()
+    values = [e.text for e in rec.entities]
+    assert len(values) == 2 and values[0] == values[1]
+
+
+def test_different_indices_stay_distinct():
+    pools = _pools()
+    rng = random.Random(0)
+    rec = fill_template("{PERSON#1} and {PERSON#2}", pools, rng)
+    names = [e.text for e in rec.entities]
+    assert len(names) == 2 and names[0] != names[1]
+
+
+def test_pair_slots_share_head_noun_family():
+    pools = _family_pools()
+    for seed in range(20):
+        rng = random.Random(seed)
+        rec = fill_template(
+            "does not contain {NEG_COMMODITY~1}, {COMMODITY~1} is fine.",
+            pools, rng,
+        )
+        rec.validate()
+        neg = next(e for e in rec.entities if e.polarity == "NEG")
+        pos = next(e for e in rec.entities if e.polarity == "POS")
+        # NEG must be a qualified form; POS is either its bare head or another
+        # family member — either way they share the head-noun suffix.
+        assert neg.text != pos.text
+        shorter, longer = sorted([neg.text.lower(), pos.text.lower()], key=len)
+        assert longer.endswith(" " + shorter) or (
+            # both qualified members of the same family: common head suffix
+            longer.split()[-1] == shorter.split()[-1]
+        )
+
+
+def test_pair_slot_values_are_deterministic_under_seed():
+    pools_a = _family_pools()
+    pools_b = _family_pools()
+    tmpl = "no {NEG_COMMODITY~1} but {COMMODITY~1} ok"
+    rec_a = fill_template(tmpl, pools_a, random.Random(11))
+    rec_b = fill_template(tmpl, pools_b, random.Random(11))
+    assert rec_a.text == rec_b.text
+
+
+def test_pair_and_index_on_same_slot_rejected():
+    pools = _family_pools()
+    rng = random.Random(0)
+    with pytest.raises(SlotFillError):
+        fill_template("{COMMODITY#1~1}", pools, rng)
+
+
+def test_pair_on_non_commodity_rejected():
+    pools = _family_pools()
+    rng = random.Random(0)
+    with pytest.raises(SlotFillError):
+        fill_template("{PERSON~1} met {PERSON~1}", pools, rng)
+
+
+def test_pair_without_families_raises():
+    pools = _pools()  # no value is a token-boundary suffix of another
+    rng = random.Random(0)
+    with pytest.raises(SlotFillError):
+        fill_template("{NEG_COMMODITY~1} vs {COMMODITY~1}", pools, rng)
+
+
 def test_contrast_cue_also_recorded_in_preserve_spans():
     pools = _pools()
     pools.add_decoy("neg_cue", "no")

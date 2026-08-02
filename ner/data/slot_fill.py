@@ -7,8 +7,18 @@ exact byte position of each entity insertion.
 Template syntax:
     {PERSON} {ORG} {ADDRESS} {COMMODITY}    entity slots (label-bearing, POS)
     {NEG_COMMODITY}                          commodity entity with polarity=NEG
-    {PERSON#1} {PERSON#2}                    indexed slots for multiple of same type
+    {PERSON#1} {PERSON#2}                    indexed slots: an index names a
+                                             variable — the same index repeats
+                                             the same value; different indices
+                                             force distinct values
     {NEG_COMMODITY#1} {NEG_COMMODITY#2}      same, for the NEG case
+    {NEG_COMMODITY~1} ... {COMMODITY~1}      paired slots: all slots sharing a
+                                             pair id draw from one head-noun
+                                             family (NEG slots get qualified
+                                             members like "treated wood", POS
+                                             slots usually get the bare head
+                                             "wood") — the negation-scope
+                                             pattern the gold set tests
     {decoy:qty} {decoy:invoice_id} {...}     non-entity filler slots
 
 Preserve spans:
@@ -31,9 +41,17 @@ from dataclasses import dataclass
 from ner.data.pools import Pools, WeightedPool
 from ner.schema import Entity, Record
 
-# Matches {PERSON}, {NEG_COMMODITY#2}, {decoy:qty}, etc.
-# `kind` allows underscores to permit NEG_COMMODITY.
-_SLOT_RE = re.compile(r"\{(?P<kind>[A-Za-z_]+)(?:#(?P<idx>\d+))?(?::(?P<sub>[A-Za-z_]+))?\}")
+# Matches {PERSON}, {NEG_COMMODITY#2}, {COMMODITY~1}, {decoy:qty}, etc.
+# `kind` allows underscores to permit NEG_COMMODITY. `idx` (#) and `pair` (~)
+# are mutually exclusive, enforced in fill_template (and mirrored by the
+# validator in scripts/build_seed.py — keep both copies in sync).
+_SLOT_RE = re.compile(
+    r"\{(?P<kind>[A-Za-z_]+)(?:#(?P<idx>\d+))?(?:~(?P<pair>\d+))?(?::(?P<sub>[A-Za-z_]+))?\}"
+)
+
+# Pair (~) slots only make sense where a head-noun family exists, which is a
+# commodity-pool concept ("treated wood" -> head "wood").
+PAIRABLE_ENTITY_TYPES: frozenset[str] = frozenset({"COMMODITY"})
 
 # Decoy slot names whose char ranges must be protected from noise. Drops here
 # would change the polarity of nearby commodity entities without re-labeling.
@@ -71,6 +89,119 @@ def _resolve_entity_slot(kind: str) -> tuple[str, str]:
     return upper, "POS"
 
 
+def build_family_index(values: list[str]) -> dict[str, list[str]]:
+    """Group pool values into head-noun families.
+
+    A value `q` is a qualified member of family `h` when both are pool values
+    and `q` ends with `h` at a token boundary ("Grade A robusta coffee" is in
+    the "robusta coffee" family AND the "coffee" family). Matching is
+    case-insensitive; returned strings keep pool casing. Only heads with at
+    least one qualified member appear as keys.
+    """
+    by_lower = {v.lower(): v for v in values}
+    families: dict[str, list[str]] = {}
+    for q in values:
+        ql = q.lower()
+        # Successive whitespace-delimited suffixes of q are candidate heads.
+        pos = ql.find(" ")
+        while pos != -1:
+            head = by_lower.get(ql[pos + 1:])
+            if head is not None and head.lower() != ql:
+                families.setdefault(head, []).append(q)
+            pos = ql.find(" ", pos + 1)
+    return families
+
+
+def _family_index(pool: WeightedPool) -> dict[str, list[str]]:
+    """`build_family_index` over a pool, cached on the pool instance."""
+    cached = getattr(pool, "_slotfill_family_index", None)
+    if cached is None:
+        cached = build_family_index(pool.values)
+        pool._slotfill_family_index = cached  # type: ignore[attr-defined]
+    return cached
+
+
+def _assign_pair_groups(
+    matches: list[re.Match],
+    pools: Pools,
+    rng: random.Random,
+) -> dict[int, str]:
+    """Pre-assign values for every ~pair slot, keyed by match position.
+
+    Per pair group: pick one head-noun family, give NEG slots qualified
+    members and POS slots the bare head (with p=0.3 a different qualified
+    member — covers "no special wood, treated wood OK"). All values within a
+    group are distinct.
+    """
+    groups: dict[str, list[int]] = {}
+    for i, m in enumerate(matches):
+        if m.group("pair") is not None and m.group("kind") != "decoy":
+            groups.setdefault(m.group("pair"), []).append(i)
+    if not groups:
+        return {}
+
+    assignments: dict[int, str] = {}
+    for pair_id in sorted(groups):
+        slot_indices = groups[pair_id]
+        etypes = set()
+        for i in slot_indices:
+            etype, _ = _resolve_entity_slot(matches[i].group("kind"))
+            etypes.add(etype)
+        if len(etypes) > 1:
+            raise SlotFillError(
+                f"pair group ~{pair_id} mixes entity types {sorted(etypes)}"
+            )
+        etype = next(iter(etypes))
+        if etype not in PAIRABLE_ENTITY_TYPES:
+            raise SlotFillError(
+                f"pair slots are only valid for {sorted(PAIRABLE_ENTITY_TYPES)}, "
+                f"got ~{pair_id} on {etype}"
+            )
+        pool = pools.entity_pools.get(etype)
+        if pool is None or pool.is_empty():
+            raise SlotFillError(f"No entity pool for {etype!r}")
+        families = _family_index(pool)
+        if not families:
+            raise SlotFillError(
+                f"pool for {etype!r} has no head-noun families; ~pair slots "
+                "need qualified values whose bare head is also in the pool"
+            )
+        head = rng.choice(list(families))
+        qualified = families[head]
+        taken: set[str] = set()
+
+        def _pick_qualified() -> str:
+            avail = [q for q in qualified if q not in taken]
+            if not avail:
+                avail = qualified
+            return rng.choice(avail)
+
+        # NEG slots first: the denial sticks to a qualified form.
+        for i in slot_indices:
+            _, polarity = _resolve_entity_slot(matches[i].group("kind"))
+            if polarity == "NEG":
+                value = _pick_qualified()
+                taken.add(value)
+                assignments[i] = value
+        # POS slots: usually the bare head, sometimes another qualified form.
+        # Never duplicate a taken value unless the family is exhausted.
+        for i in slot_indices:
+            _, polarity = _resolve_entity_slot(matches[i].group("kind"))
+            if polarity == "POS":
+                avail_q = [q for q in qualified if q not in taken]
+                if rng.random() < 0.3 and avail_q:
+                    value = rng.choice(avail_q)
+                elif head not in taken:
+                    value = head
+                elif avail_q:
+                    value = rng.choice(avail_q)
+                else:
+                    value = head
+                taken.add(value)
+                assignments[i] = value
+    return assignments
+
+
 def fill_template(
     template: str,
     pools: Pools,
@@ -86,14 +217,30 @@ def fill_template(
     """
     # Distinct-sample tracking is keyed by entity_type, NOT polarity — drawing
     # the same commodity value as both POS and NEG in one record is degenerate.
+    # Exception: ~pair slots intentionally share a head-noun family, so their
+    # values are assigned as a group first and only then recorded here.
     used: dict[str, set[str]] = {}
+    # Indexed slots are variables: (KIND, idx) -> value sampled at first use.
+    assigned_vars: dict[tuple[str, str], str] = {}
     out_parts: list[str] = []
     entities: list[Entity] = []
     preserve_spans: list[tuple[int, int]] = []
     cursor = 0
     char_pos = 0
 
-    for m in _SLOT_RE.finditer(template):
+    matches = list(_SLOT_RE.finditer(template))
+    for m in matches:
+        if m.group("idx") is not None and m.group("pair") is not None:
+            raise SlotFillError(f"slot mixes #index and ~pair: {m.group(0)}")
+        if m.group("pair") is not None and m.group("kind") == "decoy":
+            raise SlotFillError(f"~pair is not valid on decoy slots: {m.group(0)}")
+
+    pair_values = _assign_pair_groups(matches, pools, rng)
+    for i, value in pair_values.items():
+        etype, _ = _resolve_entity_slot(matches[i].group("kind"))
+        used.setdefault(etype, set()).add(value)
+
+    for i, m in enumerate(matches):
         literal = template[cursor:m.start()]
         out_parts.append(literal)
         char_pos += len(literal)
@@ -118,10 +265,26 @@ def fill_template(
             pool = pools.entity_pools.get(entity_type)
             if pool is None or pool.is_empty():
                 raise SlotFillError(f"No entity pool for {entity_type!r}")
-            exclude = used.setdefault(entity_type, set()) if distinct_within_record else set()
-            value = _weighted_choice(rng, pool, exclude)
-            if distinct_within_record:
-                used[entity_type].add(value)
+            if i in pair_values:
+                value = pair_values[i]
+            elif m.group("idx") is not None:
+                var_key = (kind.upper(), m.group("idx"))
+                if var_key in assigned_vars:
+                    value = assigned_vars[var_key]
+                else:
+                    exclude = (
+                        used.setdefault(entity_type, set())
+                        if distinct_within_record else set()
+                    )
+                    value = _weighted_choice(rng, pool, exclude)
+                    assigned_vars[var_key] = value
+                    if distinct_within_record:
+                        used[entity_type].add(value)
+            else:
+                exclude = used.setdefault(entity_type, set()) if distinct_within_record else set()
+                value = _weighted_choice(rng, pool, exclude)
+                if distinct_within_record:
+                    used[entity_type].add(value)
             start = char_pos
             out_parts.append(value)
             char_pos += len(value)

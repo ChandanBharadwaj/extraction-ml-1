@@ -22,7 +22,6 @@ from ner.eval.threshold_sweep import (
     load_thresholds_json,
     parse_objective,
     sweep,
-    thresholds_dict_to_array,
     write_thresholds_json,
 )
 
@@ -188,3 +187,94 @@ def test_write_thresholds_json_is_readable_by_runtime_loader(tmp_path):
     assert arr[LABEL2ID["B-COMMODITY"]] == pytest.approx(0.5)
     assert arr[LABEL2ID["B-NEG_COMMODITY"]] == pytest.approx(0.7)
     assert arr[0] == 0.0  # O never gated
+
+
+def test_cache_probabilities_preprocesses_like_serving():
+    """Gold text with NBSP / doubled spaces must be cleaned before encoding,
+    exactly as NERRuntime.predict cleans incoming text — otherwise thresholds
+    are tuned on a tokenization production never sees."""
+    from ner.infer.runtime import NERRuntime, NERRuntimeConfig
+    from ner.preprocess import Preprocessor
+    from ner.eval.threshold_sweep import cache_probabilities
+    from ner.schema import Entity, Record
+
+    raw_text = "cargo:  robusta  coffee"
+    cleaned_expected = Preprocessor().clean(raw_text).text
+    assert cleaned_expected == "cargo: robusta coffee"
+
+    rec = Record(
+        text=raw_text,
+        entities=[Entity("COMMODITY", "robusta  coffee", 8, 23)],
+    )
+    rec.validate()
+
+    rt = NERRuntime.__new__(NERRuntime)
+    rt.config = NERRuntimeConfig(onnx_path="", tokenizer_dir="")
+    rt.thresholds = None
+    rt.preprocessor = Preprocessor()
+    forwarded: list[str] = []
+
+    def fake_forward(text: str):
+        forwarded.append(text)
+        offsets = _whitespace_offsets(text)
+        logits = np.zeros((len(offsets), NUM_LABELS), dtype=np.float32)
+        logits[:, 0] = 5.0
+        return logits, offsets
+
+    rt._forward = fake_forward  # type: ignore[method-assign]
+
+    cache = cache_probabilities(rt, [rec])
+    # The model saw the cleaned text, not the raw text.
+    assert forwarded == [cleaned_expected]
+    assert cache.texts == [cleaned_expected]
+    # The cached gold was projected into the same cleaned coordinates.
+    assert len(cache.gold) == 1
+    ent = cache.gold[0].entities[0]
+    assert cache.gold[0].text[ent.start:ent.end] == ent.text == "robusta coffee"
+
+
+def test_refinement_passes_never_hurt_the_objective():
+    cache = _synthetic_cache(GOLD_SEED, confidence=0.95)
+    single = sweep(cache, GOLD_SEED, "f1_micro", step=0.1, max_refine_passes=1)
+    multi = sweep(cache, GOLD_SEED, "f1_micro", step=0.1, max_refine_passes=3)
+    assert multi.report.micro.f1 >= single.report.micro.f1
+
+
+def test_zero_support_note_reports_inherited_global_threshold():
+    # GOLD_SEED has no PERSON-free label... construct gold with only COMMODITY
+    # records so PERSON/ORG/ADDRESS have zero support.
+    commodity_only = [r for r in GOLD_SEED if all(e.type == "COMMODITY" for e in r.entities)]
+    assert commodity_only
+    cache = _synthetic_cache(commodity_only, confidence=0.95)
+    result = sweep(cache, commodity_only, "f1_micro", step=0.2)
+    notes = " | ".join(result.notes)
+    assert "no gold support for B-PERSON" in notes
+    assert "inheriting the global threshold" in notes
+    assert "left at 0.0" not in notes
+
+
+def test_per_type_precision_floor_infeasible_when_unreachable():
+    cache = _synthetic_cache(GOLD_SEED, confidence=0.95)
+    result = sweep(
+        cache, GOLD_SEED, "f1_micro", step=0.2,
+        per_type_precision_floors={"COMMODITY(NEG)": 1.0000001},
+    )
+    assert not result.feasible
+
+
+def test_split_gold_partitions_deterministically():
+    from ner.eval.gold import split_gold
+
+    a = split_gold(GOLD_SEED, "earlystop")
+    b = split_gold(GOLD_SEED, "tune")
+    assert len(a) + len(b) == len(GOLD_SEED)
+    texts_a = {r.text for r in a}
+    texts_b = {r.text for r in b}
+    assert not (texts_a & texts_b)
+    # Stable across calls and independent of ordering.
+    assert [r.text for r in split_gold(list(reversed(GOLD_SEED)), "earlystop")] == [
+        r.text for r in reversed(a)
+    ]
+    assert split_gold(GOLD_SEED, "all") == GOLD_SEED
+    with pytest.raises(ValueError):
+        split_gold(GOLD_SEED, "bogus")

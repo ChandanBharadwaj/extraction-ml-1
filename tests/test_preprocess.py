@@ -22,7 +22,6 @@ import pytest
 from ner.preprocess import (
     PreprocessConfig,
     Preprocessor,
-    PreprocessResult,
 )
 from ner.schema import Entity, Record
 

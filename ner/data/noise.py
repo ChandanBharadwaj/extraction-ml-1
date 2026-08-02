@@ -21,17 +21,41 @@ from ner.schema import Entity, Record
 
 @dataclass
 class NoiseConfig:
+    # Casing is a single exclusive draw: lowercase with p_lowercase, else
+    # UPPERCASE with p_uppercase (telex/B/L register), else unchanged.
     p_lowercase: float = 0.25
+    p_uppercase: float = 0.15
     p_drop_punct: float = 0.25
     drop_punct_rate: float = 0.5
     p_typo: float = 0.15
     typo_rate: float = 0.02
+    # OCR-shaped confusions (0<->O, 1<->l/I, 5<->S, ...), length-preserving.
+    p_ocr: float = 0.10
+    ocr_rate: float = 0.03
     p_truncate: float = 0.05
     truncate_max_chars: int = 8
     preserve_entity_surface: bool = True
 
 
 _PUNCT = set(",.;:!?-—|")
+
+# Length-preserving OCR confusion pairs only — substitutions that change
+# string length (rn->m) would need the deletion machinery for no gain.
+_OCR_CONFUSIONS: dict[str, str] = {
+    "0": "O", "O": "0",
+    "1": "l", "l": "1", "I": "1",
+    "5": "S", "S": "5",
+    "8": "B", "B": "8",
+    "2": "Z", "Z": "2",
+}
+
+
+def _safe_upper(text: str) -> str:
+    """Uppercase only where the mapping is length-preserving (guards ß->SS)."""
+    return "".join(
+        ch.upper() if len(ch.upper()) == 1 else ch
+        for ch in text
+    )
 
 
 def _get_preserve_spans(record: Record) -> list[tuple[int, int]]:
@@ -136,14 +160,25 @@ def apply_noise(record: Record, config: NoiseConfig, rng: random.Random) -> Reco
     meta = dict(record.meta) if record.meta else {}
     _set_preserve_spans(meta, preserve_spans)
 
-    # 1) Lowercase (offsets preserved).
-    if rng.random() < config.p_lowercase:
+    # 1) Casing (offsets preserved) — one exclusive draw: lowercase, else
+    #    UPPERCASE (telex/manifest register), else unchanged. Casing applies
+    #    to entity surfaces too (matching real-world whole-document casing);
+    #    entities are re-sliced so text[start:end] == entity.text holds.
+    casing_draw = rng.random()
+    if casing_draw < config.p_lowercase:
         text = text.lower()
+    elif casing_draw < config.p_lowercase + config.p_uppercase:
+        text = _safe_upper(text)
+    if len(text) == len(record.text):
         entities = [
             Entity(type=e.type, text=text[e.start:e.end],
                    start=e.start, end=e.end, polarity=e.polarity)
             for e in entities
         ]
+    else:
+        # A pathological lower() mapping changed length; fall back to the
+        # original text rather than corrupt offsets.
+        text = record.text
 
     # 2) Drop punctuation (offsets shift). Skip chars inside entities or
     #    preserve_spans (negation/contrast cues).
@@ -184,7 +219,30 @@ def apply_noise(record: Record, config: NoiseConfig, rng: random.Random) -> Reco
             for e in entities
         ]
 
-    # 4) Trailing truncation (may delete entities). Block truncation that would
+    # 4) OCR-shaped confusions (offsets preserved). Same skip rules as typos:
+    #    entity surfaces (when preserved) and negation-cue spans are exempt.
+    if rng.random() < config.p_ocr:
+        ent_ranges = [(e.start, e.end) for e in entities]
+        new_chars = []
+        for i, ch in enumerate(text):
+            if config.preserve_entity_surface and _is_in_any(i, ent_ranges):
+                new_chars.append(ch)
+                continue
+            if _is_in_any(i, preserve_spans):
+                new_chars.append(ch)
+                continue
+            if ch in _OCR_CONFUSIONS and rng.random() < config.ocr_rate:
+                new_chars.append(_OCR_CONFUSIONS[ch])
+            else:
+                new_chars.append(ch)
+        text = "".join(new_chars)
+        entities = [
+            Entity(type=e.type, text=text[e.start:e.end],
+                   start=e.start, end=e.end, polarity=e.polarity)
+            for e in entities
+        ]
+
+    # 5) Trailing truncation (may delete entities). Block truncation that would
     #    chop into a preserve_span.
     if rng.random() < config.p_truncate and len(text) > 10:
         drop_n = rng.randint(1, config.truncate_max_chars)

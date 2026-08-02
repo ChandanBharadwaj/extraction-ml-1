@@ -18,7 +18,8 @@ Pipeline:
            label independently and accept any improvement.
 
 Failure modes handled explicitly:
-  - Labels with zero gold support: cannot be tuned; left at 0.0 with a note.
+  - Labels with zero gold support: cannot be tuned; they inherit the stage-1
+    global threshold, with a note saying so.
   - Precision-floor / recall-floor objectives that no threshold can reach:
     the script reports the best achievable value and returns a `SweepResult`
     with `feasible=False`. The CLI converts this to a non-zero exit.
@@ -48,7 +49,11 @@ class ProbCache:
     """Per-record cached softmax probabilities and tokenization metadata."""
     probs: list[np.ndarray]                    # each (n_tokens, n_labels) float32
     offsets: list[list[tuple[int, int]]]       # each token's char offset
-    texts: list[str]                           # source text per record
+    texts: list[str]                           # cleaned source text per record
+    # Gold records projected into the same cleaned coordinates as `texts`.
+    # Populated by `cache_probabilities`; sweep callers should evaluate
+    # against these, not the raw gold, so tuning matches serving.
+    gold: list[Record] = field(default_factory=list)
 
 
 @dataclass
@@ -82,26 +87,33 @@ def cache_probabilities(
     """Run the ONNX model once over the gold set, return cached softmax
     probabilities + offset mappings.
 
-    Uses the runtime's existing `_encode` + `_session.run` to keep the
-    tokenization path identical to production serving.
+    Each gold record is first projected through the runtime's preprocessor —
+    exactly what `NERRuntime.predict` does to incoming text — so thresholds
+    are tuned on the same tokenization they will gate in production (and the
+    same projection `ner.train.metrics.SpanF1Metric` applies during early
+    stopping). The model runs through `runtime._forward`, so long gold
+    records window identically to serving. Records that clean to empty are
+    dropped.
     """
     probs_list: list[np.ndarray] = []
     offsets_list: list[list[tuple[int, int]]] = []
     texts: list[str] = []
+    cleaned_gold: list[Record] = []
 
     for rec in gold:
-        text = rec.text[: runtime.config.max_input_chars]
-        input_ids, attention_mask, offsets = runtime._encode(text)
-        logits = runtime._session.run(
-            ["logits"],
-            {"input_ids": input_ids, "attention_mask": attention_mask},
-        )[0]  # shape (1, n_tokens, n_labels)
-        p = softmax(logits[0].astype(np.float32), axis=-1)
+        cleaned = runtime.preprocessor.apply_to_record(rec)
+        if not cleaned.text:
+            continue
+        logits, offsets = runtime._forward(cleaned.text)
+        p = softmax(logits.astype(np.float32), axis=-1)
         probs_list.append(p)
         offsets_list.append(list(offsets))
-        texts.append(text)
+        texts.append(cleaned.text)
+        cleaned_gold.append(cleaned)
 
-    return ProbCache(probs=probs_list, offsets=offsets_list, texts=texts)
+    return ProbCache(
+        probs=probs_list, offsets=offsets_list, texts=texts, gold=cleaned_gold,
+    )
 
 
 # --------------------------- decoding layer ------------------------------- #
@@ -157,19 +169,45 @@ def _f1_at_recall_floor(floor: float) -> ObjectiveFn:
     return fn
 
 
-def parse_objective(name: str, *, precision_floor: float = 0.0, recall_floor: float = 0.0) -> ObjectiveFn:
+def _with_per_type_precision_floors(
+    base: ObjectiveFn, floors: dict[str, float],
+) -> ObjectiveFn:
+    """Constrain any objective: infeasible (-1.0) unless every named bucket
+    (e.g. "COMMODITY(NEG)") meets its precision floor."""
+    def fn(rep: EvalReport) -> float:
+        for bucket, floor in floors.items():
+            m = rep.per_type.get(bucket)
+            if (m.precision if m else 0.0) < floor:
+                return -1.0
+        return base(rep)
+    return fn
+
+
+def parse_objective(
+    name: str,
+    *,
+    precision_floor: float = 0.0,
+    recall_floor: float = 0.0,
+    per_type_precision_floors: dict[str, float] | None = None,
+) -> ObjectiveFn:
     if name == "f1_micro":
-        return _f1_micro
-    if name == "f1_macro":
-        return _f1_macro
-    if name.startswith("f1_per_type:"):
+        objective = _f1_micro
+    elif name == "f1_macro":
+        objective = _f1_macro
+    elif name.startswith("f1_per_type:"):
         bucket = name.split(":", 1)[1]
-        return _f1_per_type(bucket)
-    if name == "max_f1_at_precision_floor":
-        return _f1_at_precision_floor(precision_floor)
-    if name == "max_f1_at_recall_floor":
-        return _f1_at_recall_floor(recall_floor)
-    raise ValueError(f"Unknown objective: {name!r}")
+        objective = _f1_per_type(bucket)
+    elif name == "max_f1_at_precision_floor":
+        objective = _f1_at_precision_floor(precision_floor)
+    elif name == "max_f1_at_recall_floor":
+        objective = _f1_at_recall_floor(recall_floor)
+    else:
+        raise ValueError(f"Unknown objective: {name!r}")
+    if per_type_precision_floors:
+        objective = _with_per_type_precision_floors(
+            objective, per_type_precision_floors,
+        )
+    return objective
 
 
 # ----------------------------- sweep ------------------------------------- #
@@ -199,19 +237,19 @@ def sweep(
     step: float = 0.01,
     precision_floor: float = 0.0,
     recall_floor: float = 0.0,
+    per_type_precision_floors: dict[str, float] | None = None,
+    max_refine_passes: int = 3,
 ) -> SweepResult:
     objective = parse_objective(
-        objective_name, precision_floor=precision_floor, recall_floor=recall_floor,
+        objective_name,
+        precision_floor=precision_floor,
+        recall_floor=recall_floor,
+        per_type_precision_floors=per_type_precision_floors,
     )
     grid = _grid(step)
     notes: list[str] = []
 
     label_support = _support_per_label(gold)
-    for lid, count in label_support.items():
-        if lid == 0:
-            continue
-        if count == 0 and ID2LABEL[lid].startswith("B-"):
-            notes.append(f"no gold support for {ID2LABEL[lid]}; left at 0.0")
 
     def evaluate_thresholds(thresholds: np.ndarray) -> EvalReport:
         preds = decode_with_thresholds(cache, thresholds)
@@ -246,27 +284,44 @@ def sweep(
     thresholds = np.full(NUM_LABELS, best_global, dtype=np.float32)
     thresholds[0] = 0.0
 
-    # Stage 2: per-label refinement.
+    # Zero-support labels cannot be tuned; they inherit the stage-1 global
+    # optimum (stage 2 never finds an improvement for them).
+    for lid, count in label_support.items():
+        if lid != 0 and count == 0 and ID2LABEL[lid].startswith("B-"):
+            notes.append(
+                f"no gold support for {ID2LABEL[lid]}; inheriting the global "
+                f"threshold {best_global:.2f}"
+            )
+
+    # Stage 2: per-label refinement, repeated until a full pass yields no
+    # improvement (capped). A single fixed-order pass would refine later
+    # labels — the COMMODITY ones sit last in LABEL_LIST — against choices
+    # already locked in for earlier labels.
     best_score = best_global_score
     best_report = best_global_report
-    for lid in range(1, NUM_LABELS):
-        baseline = thresholds[lid]
-        local_best_t = baseline
-        for t in grid:
-            thresholds[lid] = float(t)
-            rep = evaluate_thresholds(thresholds)
-            score = objective(rep)
-            sweep_curve.append({
-                "stage": "per_label", "label": ID2LABEL[lid],
-                "threshold": float(t),
-                "f1": rep.micro.f1, "precision": rep.micro.precision, "recall": rep.micro.recall,
-                "objective": score,
-            })
-            if score > best_score:
-                best_score = score
-                local_best_t = float(t)
-                best_report = rep
-        thresholds[lid] = local_best_t
+    for _ in range(max(1, max_refine_passes)):
+        improved_this_pass = False
+        for lid in range(1, NUM_LABELS):
+            baseline = thresholds[lid]
+            local_best_t = baseline
+            for t in grid:
+                thresholds[lid] = float(t)
+                rep = evaluate_thresholds(thresholds)
+                score = objective(rep)
+                sweep_curve.append({
+                    "stage": "per_label", "label": ID2LABEL[lid],
+                    "threshold": float(t),
+                    "f1": rep.micro.f1, "precision": rep.micro.precision, "recall": rep.micro.recall,
+                    "objective": score,
+                })
+                if score > best_score:
+                    best_score = score
+                    local_best_t = float(t)
+                    best_report = rep
+                    improved_this_pass = True
+            thresholds[lid] = local_best_t
+        if not improved_this_pass:
+            break
 
     if best_score <= -1.0:
         feasible = False

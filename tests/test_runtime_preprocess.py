@@ -57,15 +57,14 @@ def test_predict_batch_preserves_input_order_when_some_inputs_empty():
 
     rt._session = _AllOSession()
 
-    # Replace _encode so we don't depend on a real tokenizer.
-    def fake_encode(text: str):
+    # Replace _encode_full so we don't depend on a real tokenizer.
+    def fake_encode_full(text: str):
         return (
-            np.zeros((1, 3), dtype=np.int64),
-            np.ones((1, 3), dtype=np.int64),
+            [1, 2, 3],
             [(0, 0), (0, len(text)), (0, 0)],  # CLS, one content token, SEP
         )
 
-    rt._encode = fake_encode  # type: ignore[method-assign]
+    rt._encode_full = fake_encode_full  # type: ignore[method-assign]
 
     outs = rt.predict_batch(["   ", "real text", "", "more text"])
     assert len(outs) == 4

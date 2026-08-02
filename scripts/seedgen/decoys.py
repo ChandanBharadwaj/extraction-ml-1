@@ -283,6 +283,12 @@ DECOYS: dict[str, list[str]] = {
         "forbidden",
         "prohibited",
         "cannot include",
+        # cargo-document denials (B/L, customs declarations)
+        "nil",
+        "NIL",
+        "does not include",
+        "zero",
+        "declares no",
     ],
 
     # -------------------------------------------------------------------------
@@ -325,6 +331,12 @@ DECOYS: dict[str, list[str]] = {
         "careless",
         "noise-cancelling",
         "wrinkle-resistant",
+        # un- prefixes that look negative but are part of the product name
+        "unrefined",
+        "unbleached",
+        "unwashed",
+        "uncoated",
+        "undyed",
     ],
 
     # -------------------------------------------------------------------------
@@ -339,5 +351,135 @@ DECOYS: dict[str, list[str]] = {
         "DAP",
         "FCA",
         "CIP",
+    ],
+
+    # -------------------------------------------------------------------------
+    # Cargo-document furniture pools. These are the highest-frequency
+    # COMMODITY false-positive sources on real B/L / manifest text; keeping
+    # them as unlabeled decoys trains the model to reject them.
+    # -------------------------------------------------------------------------
+    "vessel": [
+        "MV EVER GIVEN",
+        "M/V PACIFIC HARMONY",
+        "MV NORDIC STAR V.023E",
+        "M/T SEA PEARL",
+        "MT STOLT ACHIEVEMENT",
+        "MV OCEAN PIONEER VOY 118W",
+        "M/V GOLDEN HORIZON",
+        "MV HANSA BREMEN",
+        "MV CAPE FLORES V.0412S",
+        "M/V ATLANTIC CARTIER",
+    ],
+
+    "container_spec": [
+        "1x20GP",
+        "1X20GP",
+        "2x40HC",
+        "1X40HC",
+        "3x40GP",
+        "1x40RF",
+        "2X20GP",
+        "1x45HC",
+        "4x40HC",
+        "1X40OT",
+        "1x20FR",
+    ],
+
+    "port": [
+        "CNSHA",
+        "SGSIN",
+        "NLRTM",
+        "INNSA",
+        "PORT KLANG",
+        "NHAVA SHEVA",
+        "ROTTERDAM",
+        "SANTOS, BRAZIL",
+        "JEBEL ALI",
+        "TANJUNG PELEPAS",
+        "FELIXSTOWE",
+        "LAEM CHABANG",
+        "MOMBASA",
+        "PORT OF HAMBURG",
+    ],
+
+    # SCAC-style carrier codes only. Full carrier company names (Maersk,
+    # Hapag-Lloyd) are real ORG surfaces and belong in the ORG pool — putting
+    # them here would train the model to miss them as ORG.
+    "carrier": [
+        "MAEU",
+        "MSCU",
+        "CMDU",
+        "HLCU",
+        "EGLV",
+        "COSU",
+        "ONEY",
+        "YMLU",
+        "ZIMU",
+        "WHLC",
+    ],
+
+    "seal_marks": [
+        "SEAL NO. CN1234567",
+        "SEAL: EMCSEA88231",
+        "MARKS: N/M",
+        "MARKS AND NUMBERS: AS ADDRESSED",
+        "SEAL 0451227",
+        "MARKS: NIL",
+        "SHIPPER SEAL ML-CN-882314",
+        "SEAL NO: HLA2214467",
+        "NO MARKS",
+        "MARKS AS PER INVOICE",
+    ],
+
+    # Bare quantity + unit with NO trailing "of" — the §8.1 boundary case
+    # ("12,000 kg HDPE resin": qty excluded, span starts at the product).
+    "qty_bare": [
+        "12,000 KG",
+        "500 MT",
+        "18,000.00 KGS",
+        "24 PKGS",
+        "500 BAGS",
+        "1,250 CTNS",
+        "40 PALLETS",
+        "25.5 MT",
+        "NET 24,000 KGS",
+        "GROSS 26,500 KGS",
+        "10,080 PCS",
+        "2,000 DRUMS",
+        "100 COILS",
+        "50,400 KGS",
+        "1 LOT",
+    ],
+
+    # Stowage / packaging phrase that follows a commodity span; the span
+    # must end before these ("palm olein in flexitank").
+    "bulk_packaging": [
+        "in bulk",
+        "in 50kg PP bags",
+        "in jumbo bags",
+        "in flexitank",
+        "in ISO tank containers",
+        "in 200L steel drums",
+        "in IBC totes",
+        "in big bags",
+        "on pallets, shrink-wrapped",
+        "in 25kg paper sacks",
+        "in reefer container at -18C",
+        "in super sacks",
+    ],
+
+    # Hazard metadata adjacent to DG commodity spans but outside them.
+    # "NON-HAZARDOUS" is a deliberate frozen-negation lookalike.
+    "dg_class": [
+        "IMO CLASS 8",
+        "IMDG CLASS 3",
+        "CLASS 5.1 OXIDIZER",
+        "IMO 9",
+        "HAZMAT CLASS 2.1",
+        "PACKING GROUP II",
+        "PG III",
+        "IMDG 6.1",
+        "NON-HAZARDOUS",
+        "DG CLASS 4.1",
     ],
 }
