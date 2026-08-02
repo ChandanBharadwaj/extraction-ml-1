@@ -180,6 +180,40 @@ last two refuse to write `thresholds.json` if no threshold combination
 satisfies the floor (non-zero exit with diagnostics). Repeatable
 `--precision-floor-type BUCKET:FLOOR` constrains any objective per-bucket.
 
+## Open-vocabulary commodity extraction (`ner/commodity/`)
+
+A separate, additive package for extracting **any** commodity from **any** text —
+not the four-type pipeline above. It exists because the two goals have
+incompatible data requirements, which is measured rather than asserted:
+
+- The slot-fill pool is 589 strings and matches **3.5%** of the 1,396 HS
+  commodity heads. The generator fills from that pool, so a model trained on its
+  output memorizes it.
+- `GOLD_SEED` was authored alongside the pool — **78%** of its commodity spans are
+  in-vocabulary — so it *cannot* detect that failure.
+- Same dictionary matcher, two sets: **0.802 F1** on `GOLD_SEED`, **0.043** on the
+  HS open-vocabulary probe. `TestMemorizationControl` pins this.
+
+Consequences for anyone working here:
+
+1. **Never evaluate open-vocabulary extraction on `GOLD_SEED`.** It is a
+   regression fixture. Use `--gold probe`, or hand-labeled real data.
+2. **Never train an open-vocabulary extractor on `scripts.generate_data` output.**
+   Its vocabulary ceiling is the pool.
+3. If a fine-tune happens, split surfaces with `eval_sets.split_vocabulary` so
+   train and eval share none.
+
+Split by class: commodities are open (need a model), negation cues are closed
+(rules suffice — `PolarityTagger` scores 1.000 given perfect spans on *both* the
+gold fixture and the unseen-vocabulary probe). Full detail in
+`docs/commodity_extraction.md`.
+
+```bash
+python -m scripts.bench_commodity --gold probe --control          # offline, no weights
+python -m scripts.bench_commodity --gold probe --sweep fastino/gliner2-base-v1
+python -m scripts.label_assist --input mine.txt --out to_correct.jsonl   # your data, locally
+```
+
 ## Where to look first
 
 - Changing what entities exist or how they're labeled → `ner/constants.py` + `ner/schema.py` (then run the full test suite to surface every consumer).

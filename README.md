@@ -8,6 +8,13 @@ hits the 1 s/record SLA on CPU.
 See the TDD for the design rationale; this README covers shape, install, and
 how to wire your seed data in.
 
+> **Extracting commodities from arbitrary text?** That is a different problem —
+> open vocabulary, not a fixed pool — and it has its own package and benchmark
+> under `ner/commodity/`. See **[docs/commodity_extraction.md](docs/commodity_extraction.md)**.
+> Short version: the slot-fill pool covers 3.5% of HS commodity heads, so a
+> dictionary built from it scores 0.802 on this repo's gold set and 0.043 on an
+> open-vocabulary probe. Anything trained on pool-generated data inherits that gap.
+
 ## Layout
 
 ```
