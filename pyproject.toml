@@ -28,13 +28,26 @@ data = [
     "anthropic>=0.40",
     "psycopg[binary]>=3.1",
 ]
+# Open-vocabulary commodity extraction. Pulls torch (~2GB) via gliner; the rest
+# of the package stays importable without it (imports are lazy).
+commodity = [
+    "gliner>=0.2.20",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    # numpy is imported directly by 4 test modules; without it `pytest` fails at
+    # collection, so it belongs in the extra that claims to run the test suite.
+    "numpy>=1.26",
 ]
 
 [tool.setuptools.packages.find]
 include = ["ner*"]
+
+[tool.setuptools.package-data]
+# The HS vocabulary backing the open-vocabulary eval probe. Without this it is
+# present in an editable install and missing from a built wheel.
+"ner.commodity" = ["resources/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
